@@ -83,9 +83,63 @@ row-level security is the only thing standing between it and your data.
 
 ## Phase status
 
-| Phase | Status |
+| Phase | Status | Notes |
+|---|---|---|
+| 0 — Audit V2 | ✅ Complete | V2 frozen as reference |
+| 1 — Foundation | ✅ Complete | Deployed and verified on Mac + phone |
+| 2 — Domain & data | ✅ Complete | 13 migrations, 10 mutation RPCs |
+| 2.1 — Verification & hardening | ✅ Complete | Traceability, RLS enforcement, fixture |
+| 2.2 — Deployment gate | 🟡 Awaiting owner action | Scripts ready in `db/deploy/` |
+| 3 — Core cellar management | ⬜ Not started | Next |
+| 4 — Flexible storage | ⬜ Not started | |
+| 5 — Interactive rack | ⬜ Not started | |
+| 6 — Home dashboard | ⬜ Not started | |
+| 7 — Atlas | ⬜ Not started | |
+| 8 — Profile & intelligence | ⬜ Not started | |
+| 9 — History, tasting, delivery | ⬜ Not started | |
+| 10 — Valuation & enrichment | ⬜ Not started | |
+| 11 — PWA, performance, a11y | ⬜ Not started | |
+| 12 — Release readiness | ⬜ Not started | |
+
+### Current state
+
+**345 tests passing** across 14 files. TypeScript strict with zero errors.
+Production build clean.
+
+Phase 1 is **deployed**. Phases 2 and 2.1 are schema and domain logic — built
+and tested locally, **migrations not yet applied to the live Supabase
+project**.
+
+| Layer | Status |
 |---|---|
-| 0 — Audit V2 | Complete |
-| 1 — Foundation | Complete |
-| 2 — Domain & data | Not started |
-| 3–12 | Not started |
+| App shell, routing, auth | Deployed and working |
+| Sync infrastructure | Built and tested, not yet carrying wine data |
+| Database schema (13 migrations) | **Awaiting deployment** |
+| Domain logic | Built and tested |
+| Wine UI | Phase 3 |
+
+### Outstanding before Phase 3 — owner action required
+
+These need your Supabase credentials, which are held only in Netlify
+environment variables. Run in order:
+
+| Step | Script | Purpose |
+|---|---|---|
+| 1 | `db/deploy/01-inspect-current-state.sql` | Read-only. Determines what is already applied |
+| 2 | `db/deploy/02-clean-rebuild.sql` | Only if step 1 says so. Has a safety interlock |
+| 3 | migrations `001`–`013` in order | **`001` changed** — carries the RLS recursion fix |
+| 4 | `db/deploy/03-post-deploy-verify.sql` | 18 checks, all must read PASS |
+| 5 | `db/deploy/04-live-rls-verification.sql` | Real auth roles. The check PGlite cannot do |
+| 6 | Development fixture | Only after step 5 passes |
+
+### Storage-agnosticism guarantee
+
+The owner's 13-column staircase rack is **one user's configuration**, never a
+default. Enforced by 41 tests in `tests/unit/layout-agnostic.test.ts`:
+
+- Applying every migration to an empty database creates **zero** storage rows
+- No product file contains the owner's geometry, `130`, or `13 columns`
+- No layout type receives special-case branching
+- A cellar can exist with no rack, or no storage at all
+- Four cellars run staircase / grid / fridge+shelving / merchant-only side by side
+- Capacity and valid positions derive from configuration in every case

@@ -2,60 +2,95 @@
 
 ## One bottle, one row
 
-`Bottle` has **no quantity field**. Twelve bottles is twelve rows.
+`bottles` has **no quantity field**. Twelve bottles is twelve rows.
 
-This is deliberate. A quantity field cannot express six bottles at home and
-six still at the merchant, cannot give each bottle its own history, and drifts
-whenever a decrement goes wrong.
+A quantity field cannot express six bottles at home and six at the merchant,
+cannot give each bottle its own history or valuation, and drifts whenever a
+decrement goes wrong. The cost lands in the interface, not the database — so
+bulk operations get first-class UI.
 
-The cost lands in the interface, not the database — so bulk operations get
-first-class UI. Adding a case must never mean twelve interactions.
-
-Two thousand bottles is two thousand rows. Postgres does not notice this.
+Two thousand bottles is two thousand rows. Postgres does not notice.
 
 ## Purchasing — three levels
 
 ```
-Acquisition          one purchase or order
-  date, source, total, reference
-
-AcquisitionItem      one line within it
-  acquisition_id →, wine_definition_id →
-  quantity, format, unit_price
-
-Bottle               one physical bottle
-  acquisition_item_id →  (optional)
+Acquisition        one order        date, source, reference, total
+  └─ AcquisitionItem   one line     wine, quantity, format, unit price
+       └─ Bottle       one bottle   optional link
 ```
 
-Three levels rather than two, so a single merchant order containing four
-different wines — or a mixed case — models correctly without changing
-anything later.
+A merchant order containing four different wines is one acquisition with four
+items. A mixed case is the same shape. Purchase metadata is stored **once**
+regardless of bottle count.
 
-A bottle's link to its acquisition item is optional: wines received as gifts
-or already owned before the app existed have no purchase record.
+`Bottle.acquisition_item_id` is nullable — gifts and pre-app stock have no
+purchase record. There is deliberately **no price column on `bottles`**: a
+second place to store money would eventually disagree with the first.
 
-## Entities
+## Bottles are never deleted
 
-| Entity | Represents |
+`bottles` has no `deleted_at`. A bottle is historical truth.
+
+`status` covers every real-world outcome: `in_cellar`, `consumed`, `gifted`,
+`sold`, `lost`, `removed`. `removed` means a mistaken inventory record, and
+**requires a reason** which is written to an immutable event.
+
+## Slot uniqueness uses a canonical key
+
+JSONB cannot enforce this alone — `{"col":1,"row":2}` and `{"row":2,"col":1}`
+are different values but the same physical slot.
+
+So every positioned bottle carries `position_key`, a deterministic string
+generated **only after** the position has been validated against its layout.
+An invalid position has no key and cannot be stored.
+
+```
+staircase   c13r16
+grid        x2y4
+shelving    s3i7
+fridge      z1s2i5
+unpositioned / external   NULL
+```
+
+The unique index is `(storage_location_id, position_key)` where
+`status='in_cellar'`. Nulls do not collide, so unlimited bottles coexist in
+merchant storage.
+
+## Valuation: basis is separate from source
+
+`source` says **where** the number came from. `valuation_basis` says **what
+kind** of number it is.
+
+| Basis | Meaning |
 |---|---|
-| `WineDefinition` | What the wine *is* — producer, vintage, geography, grapes |
-| `Acquisition` | A purchase event |
-| `AcquisitionItem` | One wine line within a purchase |
-| `Bottle` | One physical bottle |
-| `StorageLocation` | A place bottles live |
-| `StorageLayout` | Optional visual geometry |
-| `BottleEvent` | Immutable ledger entry |
-| `TastingRecord` | A tasting, linked to bottle and event |
-| `ValuationRecord` | A valuation at a point in time |
-| `CellarProfile` | Consumption behaviour and preferences |
+| `market_estimate` | Broad market view |
+| `merchant_retail` | A merchant's asking price |
+| `auction_estimate` | Pre-sale estimate |
+| `realised_sale` | What it **actually** sold for |
+| `manual_estimate` | The owner's own judgement |
 
-## Nothing is ever deleted
+An auction house's hammer price is `source='auction_house'`,
+`basis='realised_sale'`. Conflating the two loses the distinction between an
+estimate and a fact.
 
-There are no `DELETE` policies on domain tables. Removal is a soft update
-setting `deleted_at` and a reason. The application is structurally incapable
-of destroying a record.
+Purchase price lives on `acquisition_items.unit_price` and never changes.
+`valuation_records` is append-only, so value history is preserved and
+unrealised gain is computable.
 
-## Purchase price vs current value
+## Geography
 
-Kept separate and never conflated. `ValuationRecord` carries a source and a
-confidence, and estimated value is never presented as guaranteed sale value.
+A self-referencing hierarchy: country → region → subregion → appellation.
+
+Every row carries **mandatory provenance**: `source`, `source_version`,
+`verified_on`, and `centroid_precision`. Nothing is seeded whose origin cannot
+be stated.
+
+- Country codes are ISO 3166-1 alpha-2 — a published standard
+- Coordinates are hand-curated and marked `approximate` — fit for placing a
+  symbol, never presented as boundaries
+- `has_boundary` is false throughout; real polygons arrive in Phase 7 for
+  countries only, from Natural Earth
+
+Wines point at the most specific node they know. `region_text` holds anything
+unmatched, and Atlas reports those as needing attention rather than dropping
+them.

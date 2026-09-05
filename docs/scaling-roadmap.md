@@ -19,9 +19,12 @@ hard limit, no rollover, no auto-recharge.**
 
 - A **production deploy costs 15 credits** → about **20 published deploys/month**
 - Bandwidth is 20 credits/GB → roughly 15 GB
-- **Deploy previews and branch deploys cost 0 credits**
+- Branch deploys and deploy previews have been described as not consuming
+  credits, but **verify this against your own account's usage page before
+  relying on it**. Pricing models change.
 
-Work on branches, preview freely, publish deliberately.
+Develop on branches and minimise production deploys. Treat preview deploys as
+free only once you have confirmed it.
 
 ### Supabase — two active projects
 

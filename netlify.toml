@@ -1,6 +1,9 @@
-# Netlify Free is credit-based: 300 credits/month, hard limit, no rollover.
-# A PRODUCTION deploy costs 15 credits (~20/month). Branch deploys and
-# deploy previews cost 0 credits — so preview freely, publish deliberately.
+# Netlify Free is credit-based with a monthly allowance that does not roll
+# over. Production deploys consume credits.
+#
+# Develop on a branch and minimise production deploys. Branch/preview deploys
+# may or may not consume credits depending on current terms — verify against
+# your account's usage page before relying on them being free.
 
 [build]
   command = "npm run build"

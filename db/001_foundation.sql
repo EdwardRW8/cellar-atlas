@@ -96,6 +96,14 @@ returns boolean language sql security definer set search_path = public stable as
   );
 $$;
 
+create or replace function is_cellar_owner(target_cellar uuid)
+returns boolean language sql security definer set search_path = public stable as $$
+  select exists (
+    select 1 from cellar_members
+    where cellar_id = target_cellar and user_id = auth.uid() and role = 'owner'
+  );
+$$;
+
 create or replace function can_edit_cellar(target_cellar uuid)
 returns boolean language sql security definer set search_path = public stable as $$
   select exists (
@@ -146,6 +154,19 @@ create trigger trg_new_user
   after insert on auth.users
   for each row execute function handle_new_user();
 
+-- ── BACKFILL EXISTING USERS ───────────────────────────────────────────────
+-- The trigger above only fires for FUTURE sign-ups. Any auth.users row that
+-- already exists — because it predates this migration, or because a rebuild
+-- dropped public.profiles while deliberately preserving auth.users — would
+-- otherwise be left with no profile.
+--
+-- This runs on every application of 001 and is idempotent, so the migration
+-- is self-healing rather than relying on a separate manual step that could
+-- be forgotten.
+insert into profiles (user_id, email)
+select u.id, u.email from auth.users u
+on conflict (user_id) do nothing;
+
 
 -- ───────────────────────────────────────────────────────────────────────────
 -- 9. TIMESTAMP MAINTENANCE
@@ -192,23 +213,20 @@ create policy "create cellars" on cellars
 
 drop policy if exists "owners update cellar" on cellars;
 create policy "owners update cellar" on cellars
-  for update using (
-    exists (select 1 from cellar_members
-            where cellar_id = cellars.id and user_id = auth.uid() and role = 'owner')
-  );
+  for update using (is_cellar_owner(id));
 
 -- CELLAR MEMBERS
 drop policy if exists "read members of my cellars" on cellar_members;
 create policy "read members of my cellars" on cellar_members
   for select using (is_cellar_member(cellar_id));
 
+-- MUST use the SECURITY DEFINER helper. An inline subquery here re-enters
+-- RLS on cellar_members and raises 42P17 infinite recursion — invisible under
+-- a superuser connection, fatal under a real one. Found by Phase 2.1 RLS tests.
 drop policy if exists "owners manage members" on cellar_members;
 create policy "owners manage members" on cellar_members
-  for all using (
-    exists (select 1 from cellar_members m
-            where m.cellar_id = cellar_members.cellar_id
-              and m.user_id = auth.uid() and m.role = 'owner')
-  );
+  for all using (is_cellar_owner(cellar_id))
+  with check (is_cellar_owner(cellar_id));
 
 -- PROFILES
 drop policy if exists "read own profile" on profiles;
