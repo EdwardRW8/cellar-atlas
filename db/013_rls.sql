@@ -14,8 +14,57 @@
 -- regardless of what the client sends.
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- is_cellar_owner() is defined in 001_foundation.sql, because the
--- cellar_members policy there depends on it to avoid 42P17 recursion.
+-- ── MEMBERSHIP HELPERS ────────────────────────────────────────────────────
+-- These are ALSO defined in 001_foundation.sql, where the cellar_members
+-- policy needs is_cellar_owner() to avoid 42P17 recursion.
+--
+-- They are repeated here deliberately. `create or replace` is idempotent, so
+-- defining them twice is harmless, and it makes this migration SELF-SUFFICIENT:
+-- it can no longer fail with "function is_cellar_owner(uuid) does not exist"
+-- against a database carrying an older 001.
+--
+-- A migration that silently depends on a function defined in another file is
+-- fragile. This one declares everything it uses.
+
+create or replace function is_cellar_member(target_cellar uuid)
+returns boolean language sql security definer set search_path = public stable as $$
+  select exists (
+    select 1 from cellar_members
+    where cellar_id = target_cellar and user_id = auth.uid()
+  );
+$$;
+
+create or replace function can_edit_cellar(target_cellar uuid)
+returns boolean language sql security definer set search_path = public stable as $$
+  select exists (
+    select 1 from cellar_members
+    where cellar_id = target_cellar
+      and user_id = auth.uid()
+      and role in ('owner','editor')
+  );
+$$;
+
+create or replace function is_cellar_owner(target_cellar uuid)
+returns boolean language sql security definer set search_path = public stable as $$
+  select exists (
+    select 1 from cellar_members
+    where cellar_id = target_cellar and user_id = auth.uid() and role = 'owner'
+  );
+$$;
+
+
+-- ── REPAIR THE MEMBERSHIP POLICY ──────────────────────────────────────────
+-- If an older 001 is applied, this policy still contains the inline subquery
+-- that raises 42P17 infinite recursion. Recreate it here so 013 leaves the
+-- database correct regardless of which 001 preceded it.
+drop policy if exists "owners manage members" on cellar_members;
+create policy "owners manage members" on cellar_members
+  for all using (is_cellar_owner(cellar_id))
+  with check (is_cellar_owner(cellar_id));
+
+drop policy if exists "owners update cellar" on cellars;
+create policy "owners update cellar" on cellars
+  for update using (is_cellar_owner(id));
 
 alter table wine_definitions  enable row level security;
 alter table storage_layouts   enable row level security;
