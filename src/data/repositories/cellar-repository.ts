@@ -11,6 +11,7 @@ import type { CellarProfile } from "@/domain/intelligence/types";
 import type { HistoryEvent } from "@/domain/history";
 import {
   distinctValuationTimestamps,
+  toInstant,
   mapValuationCurrencies,
   coversAllTimestamps,
   type ValuableBottle,
@@ -367,13 +368,31 @@ export class CellarRepository {
 
     // ── Fallback: bounded range, matched exactly on the client ──
     if (!coversAllTimestamps(timestamps, rows)) {
-      const sorted = [...timestamps].sort();
+      const instants = timestamps
+        .map((timestamp) => toInstant(timestamp))
+        .filter((instant): instant is number => instant !== null);
+
+      if (instants.length === 0) {
+        return {
+          valuations: mapValuationCurrencies(bottles, []),
+          strategy: "none",
+        };
+      }
+
+      // Do not reuse the exact valuation timestamp as a PostgREST range
+      // boundary. Production has shown that timestamptz wire-format
+      // differences can make an exact boundary exclude the row even though
+      // it denotes the same instant. Widen by 1 ms, then let
+      // rowMatchesBottle perform the exact instant match on the client.
+      const lower = new Date(Math.min(...instants) - 1).toISOString();
+      const upper = new Date(Math.max(...instants) + 1).toISOString();
+
       const ranged = await this.sb
         .from("valuation_records")
         .select(columns)
         .eq("cellar_id", this.cellarId)
-        .gte("created_at", sorted[0]!)
-        .lte("created_at", sorted[sorted.length - 1]!);
+        .gte("created_at", lower)
+        .lte("created_at", upper);
 
       if (ranged.error) throw new Error(ranged.error.message);
 
