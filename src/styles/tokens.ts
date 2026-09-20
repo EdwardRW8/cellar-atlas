@@ -109,6 +109,27 @@ export const radius = {
 /** Minimum touch target — WCAG 2.5.5 / Apple HIG. Enforced in tests. */
 export const TOUCH_TARGET_MIN_PX = 44;
 
+/**
+ * Vertical space that fixed bottom UI occupies on mobile.
+ *
+ * Two things float over the content:
+ *
+ *   bottom navigation   0px  →  ~60px   (fixed, bottom: 0)
+ *   Add Wine button    76px  →  132px   (bottom: 4.75rem, height 56px)
+ *
+ * Scrollable content previously reserved 4.5rem (72px), which cleared the
+ * navigation but NOT the button — so the last ~60px of every screen sat
+ * underneath it and could not be tapped. The rack's "Face on" control sits at
+ * the very bottom, which is how the fault surfaced.
+ *
+ * 9rem = 144px clears the button's top edge (132px) with a small margin.
+ * Derived from the button's own geometry below, so the two cannot drift apart.
+ */
+export const ADD_BUTTON_OFFSET_REM = 4.75;
+export const ADD_BUTTON_SIZE_PX = TOUCH_TARGET_MIN_PX + 12;
+export const FIXED_UI_CLEARANCE_REM =
+  ADD_BUTTON_OFFSET_REM + ADD_BUTTON_SIZE_PX / 16 + 0.75;
+
 export const motion = {
   fast: "120ms cubic-bezier(0.4,0,0.2,1)",
   base: "200ms cubic-bezier(0.4,0,0.2,1)",

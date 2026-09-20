@@ -5,3 +5,10 @@ dist
 coverage
 .DS_Store
 *.log
+
+# Local Netlify folder
+.netlify
+
+# Playwright generated output
+playwright-report/
+test-results/

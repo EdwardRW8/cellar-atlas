@@ -1,3 +1,4 @@
+import { FIXED_UI_CLEARANCE_REM } from "@/styles/tokens";
 import type { ReactNode } from "react";
 import { BottomNav } from "./BottomNav";
 import { SideNav } from "./SideNav";
@@ -14,7 +15,18 @@ export function AppShell({ children }: { children: ReactNode }) {
     return (
       <div style={{ display: "flex", minHeight: "100vh" }}>
         <SideNav />
-        <main style={{ flex: 1, minWidth: 0, maxWidth: 1100, padding: "1.5rem" }}>
+        <main
+          style={{
+            flex: 1,
+            minWidth: 0,
+            maxWidth: 1100,
+            padding: "1.5rem",
+            // The Add Wine button floats on desktop too, with no bottom nav
+            // beneath it. Reserve enough room that content can still be
+            // reached; the rest of the desktop layout is unchanged.
+            paddingBottom: `${FIXED_UI_CLEARANCE_REM}rem`,
+          }}
+        >
           {children}
         </main>
       </div>
@@ -26,7 +38,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main
         style={{
           flex: 1,
-          paddingBottom: "calc(4.5rem + var(--safe-bottom))",
+          paddingBottom: `calc(${FIXED_UI_CLEARANCE_REM}rem + var(--safe-bottom))`,
         }}
       >
         {children}

@@ -211,13 +211,38 @@ describe("the owner's rack is not baked into the product", () => {
     }
   });
 
-  it("no layout type receives special-case branching", () => {
+  /*
+   * REFINED IN PHASE 4.
+   *
+   * Previously this banned any `=== "staircase"` comparison. That was a
+   * usable proxy while no UI created layouts, but it is wrong now: a create
+   * form MUST branch on the type the user picked, because each type needs
+   * different inputs. That is form-to-config dispatch, not layout logic.
+   *
+   * The invariant that actually matters is narrower and stronger: nothing may
+   * branch on a PERSISTED location's `layoutType` to decide behaviour. That
+   * is what would break when a seventh type is added.
+   */
+  it("nothing branches on a persisted layout type to decide behaviour", () => {
     for (const f of productFiles) {
       const s = readFileSync(join(ROOT, f), "utf8");
-      // A switch over LayoutType is fine. An `if (type === "staircase")`
-      // outside the dispatch is not.
-      const specialCases = s.match(/if\s*\([^)]*===\s*["']staircase["']/g) ?? [];
-      expect(specialCases, `${f} special-cases staircase`).toHaveLength(0);
+      const branches =
+        s.match(
+          /(layoutType|layout\.type|\.type)\s*===\s*["'](staircase|grid|shelving|fridge)["']/g,
+        ) ?? [];
+      // Phase 5 removed the last exception: the fuller layout editor covers
+      // every positioned type, so nothing branches on a persisted type at all.
+      expect(branches, `${f} branches on a persisted layout type`).toHaveLength(0);
+    }
+  });
+
+  it("layout geometry is never reimplemented outside the domain", () => {
+    for (const f of productFiles.filter((f) => !f.includes("/domain/storage/"))) {
+      const s = readFileSync(join(ROOT, f), "utf8");
+      expect(s, `${f} sums heights itself`).not.toMatch(/heights[\s\S]{0,40}\.reduce\(/);
+      expect(s, `${f} multiplies rows by columns itself`).not.toMatch(
+        /rows\s*\*\s*columns|columns\s*\*\s*rows/,
+      );
     }
   });
 

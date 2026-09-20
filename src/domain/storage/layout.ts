@@ -403,3 +403,14 @@ export function freePositions(
     return r.valid && !occupiedKeys.has(r.key);
   });
 }
+
+/**
+ * A Position as a plain record.
+ *
+ * The Position union is deliberately specific per layout type, which means it
+ * has no index signature. UI code that renders positions generically needs a
+ * record. One conversion here beats a cast at every call site.
+ */
+export function positionToRecord(p: Position): Record<string, number> {
+  return { ...p } as unknown as Record<string, number>;
+}
