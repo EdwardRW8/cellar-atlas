@@ -110,17 +110,6 @@ export function ValuationHistory({
     [bottles, costs, valuations],
   );
 
-  console.log("[valuation-panel]", {
-    bottleCount: bottles.length,
-    bottleIds: bottles.map((b) => b.id.slice(0, 8)),
-    valuationMapSize: valuations.size,
-    valuationsForTheseBottles: bottles.map((b) => ({
-      bottle: b.id.slice(0, 8),
-      valuation: valuations.get(b.id) ?? null,
-    })),
-    holding,
-  });
-
   return (
     <section style={{ marginTop: "1.5rem" }}>
       <h2 style={sectionLabel}>Valuation</h2>

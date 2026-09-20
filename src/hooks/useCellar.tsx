@@ -153,13 +153,10 @@ export function CellarProvider({ children }: { children: ReactNode }) {
               currentValueAt: b.currentValueAt ?? null,
             })),
           )
-          .catch((error) => {
-            console.error(
-              "[valuation] loadValuationCurrencies failed:",
-              error instanceof Error ? error.message : String(error),
-            );
-            return { valuations: new Map(), strategy: "none" as const };
-          }),
+          .catch(() => ({
+            valuations: new Map(),
+            strategy: "none" as const,
+          })),
         repo.loadAcquisitionCosts().catch(() => new Map()),
       ]);
 
