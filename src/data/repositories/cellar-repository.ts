@@ -11,7 +11,6 @@ import type { CellarProfile } from "@/domain/intelligence/types";
 import type { HistoryEvent } from "@/domain/history";
 import {
   distinctValuationTimestamps,
-  toInstant,
   mapValuationCurrencies,
   coversAllTimestamps,
   type ValuableBottle,
@@ -284,6 +283,144 @@ export class CellarRepository {
   }
 
   /**
+   * Has this exact file been imported into this cellar before?
+   *
+   * The importer stores a content fingerprint in `acquisitions.reference`,
+   * which is ordinary RLS-scoped data — no migration, no new column. This
+   * makes duplicate protection survive a page reload, a new session and a
+   * different device, which an in-memory operation id cannot.
+   *
+   * A hit is a WARNING, never a block: importing the same wines again is
+   * sometimes exactly what the user means.
+   */
+  /**
+   * Has this exact file been imported before?
+   *
+   * One file now yields several acquisitions, each referenced
+   * `import:<fileFingerprint>:<groupFingerprint>`, so detection matches the
+   * shared PREFIX. `%` and `_` are escaped because both are LIKE wildcards —
+   * the prefix is matched literally. SELECT only, under RLS.
+   *
+   * This is duplicate-FILE DETECTION, used to warn. It is not idempotency and
+   * never blocks: a genuinely repeated purchase must stay possible.
+   *
+   * Returns the IMPORT time of the earliest match, not a purchase date: the
+   * warning is about when the file came in, and a purchase date may be
+   * unknown.
+   */
+  async findPriorImport(
+    referencePrefix: string,
+  ): Promise<{ id: string; purchasedOn: string | null } | null> {
+    const literal = referencePrefix.replace(/[\\%_]/g, (c) => `\\${c}`);
+    const { data, error } = await this.sb
+      .from("acquisitions")
+      .select("id, purchased_on, created_at")
+      .eq("cellar_id", this.cellarId)
+      .like("reference", `${literal}%`)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw new Error(error.message);
+    if (!data) return null;
+
+    return {
+      id: data.id as string,
+      // The IMPORT time. With one acquisition per purchase, purchased_on is a
+      // historical date that may be years old, or unknown — showing it would
+      // misstate when this file was imported.
+      purchasedOn: (data.created_at as string | null) ?? null,
+    };
+  }
+
+  /**
+   * Every wine definition in the cellar, reduced to its identity.
+   *
+   * Used to decide reuse versus creation. The fields are exactly those in the
+   * database's own uniqueness index, so the importer's notion of "the same
+   * wine" cannot drift from the constraint that would reject the insert.
+   */
+  async loadWineIdentities(): Promise<
+    { id: string; producer: string; name: string; vintage: number | null }[]
+  > {
+    const { data, error } = await this.sb
+      .from("wine_definitions")
+      .select("id, producer, name, vintage")
+      .eq("cellar_id", this.cellarId)
+      .is("deleted_at", null);
+
+    if (error) throw new Error(error.message);
+
+    return (data ?? []).map((r) => ({
+      id: r.id as string,
+      producer: (r.producer as string) ?? "",
+      name: (r.name as string) ?? "",
+      vintage: toNumber(r.vintage),
+    }));
+  }
+
+  /**
+   * The items and bottles one acquisition created.
+   *
+   * `create_acquisition_with_items` returns only the acquisition id; item and
+   * bottle ids are generated inside it. This reads them back so a CSV import
+   * can move the right bottles out of the cellar afterwards.
+   *
+   * Both reads are keyed on foreign keys — acquisition_id, then
+   * acquisition_item_id — never on ordering or timestamps. SELECT only; RLS
+   * applies unchanged.
+   */
+  async loadAcquisitionContents(acquisitionId: string): Promise<{
+    items: {
+      id: string;
+      wineDefinitionId: string;
+      quantity: number;
+      bottleSize: string;
+      unitPrice: string | number | null;
+    }[];
+    bottles: {
+      id: string;
+      version: number;
+      status: string;
+      acquisitionItemId: string;
+    }[];
+  }> {
+    const itemRes = await this.sb
+      .from("acquisition_items")
+      .select("id, wine_definition_id, quantity, bottle_size, unit_price")
+      .eq("acquisition_id", acquisitionId);
+    if (itemRes.error) throw new Error(itemRes.error.message);
+
+    const items = (itemRes.data ?? []).map((r) => ({
+      id: r.id as string,
+      wineDefinitionId: r.wine_definition_id as string,
+      quantity: r.quantity as number,
+      bottleSize: r.bottle_size as string,
+      unitPrice: (r.unit_price as string | number | null) ?? null,
+    }));
+    if (items.length === 0) return { items, bottles: [] };
+
+    const bottleRes = await this.sb
+      .from("bottles")
+      .select("id, version, status, acquisition_item_id")
+      .in(
+        "acquisition_item_id",
+        items.map((i) => i.id),
+      );
+    if (bottleRes.error) throw new Error(bottleRes.error.message);
+
+    return {
+      items,
+      bottles: (bottleRes.data ?? []).map((r) => ({
+        id: r.id as string,
+        version: r.version as number,
+        status: r.status as string,
+        acquisitionItemId: r.acquisition_item_id as string,
+      })),
+    };
+  }
+
+  /**
    * Acquisition cost for every line in the cellar, with its currency.
    *
    * One bulk read. Currency lives on the parent `acquisitions` row —
@@ -368,31 +505,13 @@ export class CellarRepository {
 
     // ── Fallback: bounded range, matched exactly on the client ──
     if (!coversAllTimestamps(timestamps, rows)) {
-      const instants = timestamps
-        .map((timestamp) => toInstant(timestamp))
-        .filter((instant): instant is number => instant !== null);
-
-      if (instants.length === 0) {
-        return {
-          valuations: mapValuationCurrencies(bottles, []),
-          strategy: "none",
-        };
-      }
-
-      // Do not reuse the exact valuation timestamp as a PostgREST range
-      // boundary. Production has shown that timestamptz wire-format
-      // differences can make an exact boundary exclude the row even though
-      // it denotes the same instant. Widen by 1 ms, then let
-      // rowMatchesBottle perform the exact instant match on the client.
-      const lower = new Date(Math.min(...instants) - 1).toISOString();
-      const upper = new Date(Math.max(...instants) + 1).toISOString();
-
+      const sorted = [...timestamps].sort();
       const ranged = await this.sb
         .from("valuation_records")
         .select(columns)
         .eq("cellar_id", this.cellarId)
-        .gte("created_at", lower)
-        .lte("created_at", upper);
+        .gte("created_at", sorted[0]!)
+        .lte("created_at", sorted[sorted.length - 1]!);
 
       if (ranged.error) throw new Error(ranged.error.message);
 

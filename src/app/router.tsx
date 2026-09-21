@@ -22,6 +22,8 @@ const Intelligence = lazy(() => import("@/features/intelligence/IntelligenceScre
 const Profile = lazy(() => import("@/features/profile/ProfileScreen"));
 const History = lazy(() => import("@/features/history/HistoryScreen"));
 const TastingLog = lazy(() => import("@/features/tasting/TastingLogScreen"));
+// Lazy: PapaParse and the planner only load when someone actually imports.
+const ImportWines = lazy(() => import("@/features/import/ImportScreen"));
 const More = lazy(() => import("@/features/more"));
 
 function Route({ area, children }: { area: string; children: React.ReactNode }) {
@@ -186,6 +188,14 @@ export const router = createBrowserRouter([
         element: (
           <Route area="Profile">
             <Profile />
+          </Route>
+        ),
+      },
+      {
+        path: "import",
+        element: (
+          <Route area="Import wines">
+            <ImportWines />
           </Route>
         ),
       },

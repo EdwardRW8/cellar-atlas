@@ -39,6 +39,7 @@ export default function More() {
             ["Cellar profile", "/profile", "How you drink and buy"],
             ["Tastings", "/tastings", "Every wine you have tasted"],
             ["History", "/history", "Everything that has happened"],
+            ["Import wines", "/import", "Add a collection from a CSV file"],
           ] as const
         ).map(([label, path, detail]) => (
           <button

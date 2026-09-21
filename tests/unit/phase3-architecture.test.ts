@@ -1639,3 +1639,303 @@ describe("Phase 10 — valuation scope", () => {
     );
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 11 — CSV IMPORT
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("Phase 11 — the importer writes only through existing RPCs", () => {
+  const importFiles = [
+    "src/domain/csv-import/mappings.ts",
+    "src/domain/csv-import/parse.ts",
+    "src/domain/csv-import/plan.ts",
+    "src/domain/csv-import/template.ts",
+    "src/features/import/ImportScreen.tsx",
+  ];
+
+  it("no direct table write exists anywhere in the importer", () => {
+    for (const f of importFiles) {
+      const s = code(f);
+      expect(s, `${f} writes directly`).not.toMatch(/\.insert\(|\.upsert\(|\.delete\(/);
+      expect(s, `${f} reaches for the client`).not.toMatch(/getSupabase|createClient/);
+    }
+  });
+
+  it("no service-role credential appears", () => {
+    for (const f of importFiles) {
+      expect(code(f)).not.toMatch(/service_role|serviceRole/);
+    }
+  });
+
+  it("mutations go through the repository primitives", () => {
+    const s = code("src/features/import/ImportScreen.tsx");
+    expect(s).toMatch(/createWineDefinition|createAcquisition/);
+  });
+
+  it("the domain layer performs NO I/O at all", () => {
+    for (const f of importFiles.filter((f) => f.includes("/domain/"))) {
+      // fingerprintCsv uses crypto.subtle, which is hashing, not I/O.
+      expect(code(f), `${f} performs I/O`).not.toMatch(/fetch\(|axios/);
+    }
+  });
+});
+
+describe("Phase 11 — canonical values are never bent", () => {
+  it("wine type maps Sweet to the canonical Dessert", () => {
+    const s = code("src/domain/csv-import/mappings.ts");
+    expect(s).toMatch(/sweet: "Dessert"/);
+    // The database enum is untouched.
+    const schema = readFileSync(join(ROOT, "db/004_wine_definitions.sql"), "utf8");
+    expect(schema).toMatch(/'Red','White','Rosé','Sparkling','Dessert','Fortified'/);
+    expect(schema).not.toMatch(/'Sweet'/);
+  });
+
+  it("insurance_value is REJECTED, never mapped to another basis", () => {
+    const s = code("src/domain/csv-import/mappings.ts");
+    expect(s).toMatch(/insurance_value/);
+    // It must not be aliased into the enum.
+    expect(s).not.toMatch(/insurance_value: "manual_estimate"/);
+    expect(s).not.toMatch(/"insurance value": "manual_estimate"/);
+  });
+
+  it("valuation provenance is preserved, not overwritten with import", () => {
+    const s = code("src/domain/csv-import/mappings.ts");
+    expect(s).toMatch(/merchant: "merchant"/);
+    expect(s).toMatch(/auction_house: "auction_house"/);
+    expect(s).toMatch(/retailer: "merchant"/);
+  });
+
+  it("a purchase price without a currency is refused, never defaulted", () => {
+    const s = code("src/domain/csv-import/parse.ts");
+    expect(s).toMatch(/A purchase price needs a currency/);
+    expect(s).toMatch(/A valuation needs a currency/);
+  });
+
+  it("every mapped value exists in the actual CHECK constraints", () => {
+    const m = code("src/domain/csv-import/mappings.ts");
+    const bases = readFileSync(join(ROOT, "db/010_tastings_valuations.sql"), "utf8");
+    for (const basis of [
+      "market_estimate",
+      "merchant_retail",
+      "auction_estimate",
+      "realised_sale",
+      "manual_estimate",
+    ]) {
+      expect(m, `${basis} missing from mappings`).toContain(basis);
+      expect(bases, `${basis} missing from schema`).toContain(basis);
+    }
+  });
+});
+
+describe("Phase 11 — idempotency and audit", () => {
+  it("downstream mutations accept a caller-supplied operation id", () => {
+    const s = readFileSync(
+      join(ROOT, "src/data/repositories/mutation-repository.ts"),
+      "utf8",
+    );
+    const stable = s.match(/args\.operationId \?\? newId\(\)/g) ?? [];
+    expect(stable.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("operation ids for planned work are DETERMINISTIC", () => {
+    const s = code("src/domain/csv-import/plan.ts");
+    expect(s).toMatch(/export async function stableOperationId/);
+  });
+
+  it("the file fingerprint is recorded on the acquisition reference", () => {
+    const s = code("src/domain/csv-import/plan.ts");
+    // Per file, then per purchase: detection survives multi-acquisition.
+    expect(code("src/domain/csv-import/acquisitions.ts")).toMatch(
+      /`import:\$\{fileFingerprint\}:\$\{/,
+    );
+    expect(s).not.toMatch(/export const importReference/);
+    // The whole-file reference no longer exists anywhere in the planner.
+    expect(s).not.toMatch(/`import:\$\{fingerprint\}`/);
+  });
+
+  it("no migration was added — count remains 16", () => {
+    const migrations = readdirSync(join(ROOT, "db")).filter((f) =>
+      /^\d{3}_.*\.sql$/.test(f),
+    );
+    expect(migrations).toHaveLength(16);
+  });
+
+  it("no existing database constraint was altered", () => {
+    for (const f of [
+      "004_wine_definitions.sql",
+      "007_bottles.sql",
+      "010_tastings_valuations.sql",
+      "013_rls.sql",
+    ]) {
+      const s = readFileSync(join(ROOT, "db", f), "utf8");
+      expect(s, `${f} was modified`).not.toMatch(/csv|import_reference/i);
+    }
+  });
+});
+
+describe("Phase 11 — scope boundary held", () => {
+  it("no export, backup or restore was built", () => {
+    // More carries a pre-existing "Backup & data" PLACEHOLDER, which is a
+    // label for later work, not an implementation. The check is that Phase 11
+    // built none of it.
+    for (const f of featureFiles.filter((f) => !f.includes("/more/"))) {
+      const s = code(f).toLowerCase();
+      expect(s, `${f} mentions backup`).not.toMatch(/backup|restore data|disaster/);
+    }
+    expect(code("src/features/more/index.tsx")).toMatch(/const LATER/);
+  });
+
+  it("no FX conversion and no enrichment service", () => {
+    for (const f of [
+      "src/domain/csv-import/plan.ts",
+      "src/features/import/ImportScreen.tsx",
+    ]) {
+      const s = code(f).toLowerCase();
+      expect(s).not.toMatch(/exchangerate|fxrate|convertcurrency/);
+      // `enrichment_source: "import"` is CORRECT — it records that these
+      // wines arrived by import. What is banned is an enrichment SERVICE.
+      expect(s).not.toMatch(/wine-searcher|vivino|enrichment api/);
+    }
+  });
+
+  it("the import chunk stays lazy", () => {
+    expect(code("src/app/router.tsx")).toMatch(
+      /lazy\(\(\) => import\("@\/features\/import\/ImportScreen"\)\)/,
+    );
+  });
+
+  it("world geometry is not pulled into the import chunk", () => {
+    expect(code("src/features/import/ImportScreen.tsx")).not.toMatch(/world-geometry/);
+  });
+});
+
+describe("Phase 11 — status transitions", () => {
+  it("status moves go through the existing change_bottle_status RPC", () => {
+    const s = code("src/features/import/ImportScreen.tsx");
+    expect(s).toMatch(/m\.changeStatus\(/);
+    expect(s).not.toMatch(/\.update\(\{\s*status/);
+  });
+
+  it("the read-back is SELECT-only and keyed on foreign keys", () => {
+    const s = readFileSync(
+      join(ROOT, "src/data/repositories/cellar-repository.ts"),
+      "utf8",
+    );
+    const fn = s.slice(s.indexOf("async loadAcquisitionContents"));
+    const body = fn.slice(
+      0,
+      fn.indexOf("\n  async ") > 0 ? fn.indexOf("\n  async ") : undefined,
+    );
+    expect(body).toMatch(/\.eq\("acquisition_id", acquisitionId\)/);
+    expect(body).toMatch(/\.in\(\s*"acquisition_item_id"/);
+    expect(body).not.toMatch(/\.insert\(|\.update\(|\.delete\(|\.upsert\(/);
+    // Never "latest bottles", never ordering or timestamps as identity.
+    expect(body).not.toMatch(/\.order\(|\.limit\(|created_at/);
+  });
+
+  it("the mapping never uses ordering or timestamps as identity", () => {
+    const s = code("src/domain/csv-import/status.ts");
+    expect(s).not.toMatch(/created_at|createdAt|\.order\(|latest/i);
+  });
+
+  it("mixed-status identical rows are blocked, not guessed", () => {
+    expect(code("src/domain/csv-import/status.ts")).toMatch(
+      /export function markStatusConflicts/,
+    );
+  });
+
+  it("a price without a currency is still blocked", () => {
+    // SUPERSEDED the whole-file mixed-currency block: with one acquisition per
+    // purchase, GBP and EUR purchases are separate and valid. The safety that
+    // remains is that no priced row may lack a currency, so the RPC's GBP
+    // default can never be applied to real money.
+    expect(code("src/domain/csv-import/parse.ts")).toMatch(
+      /A purchase price needs a currency/,
+    );
+  });
+
+  it("no migration was needed — count still 16", () => {
+    const migrations = readdirSync(join(ROOT, "db")).filter((f) =>
+      /^\d{3}_.*\.sql$/.test(f),
+    );
+    expect(migrations).toHaveLength(16);
+  });
+});
+
+describe("Phase 11 — one acquisition per truthful purchase", () => {
+  const ACQ = () => code("src/domain/csv-import/acquisitions.ts");
+
+  it("groups on date, merchant and currency — never price, quantity or wine", () => {
+    const key = ACQ().slice(ACQ().indexOf("export function groupKeyOf"));
+    const body = key.slice(0, key.indexOf("\n}\n"));
+    expect(body).toMatch(/purchasedOn/);
+    expect(body).toMatch(/merchant/);
+    expect(body).toMatch(/currency/);
+    expect(body).not.toMatch(/unitPrice|quantity|wineKey|wineName|producer/);
+  });
+
+  it("each group gets an attempt-derived operation id", () => {
+    expect(ACQ()).toMatch(/stableOperationId\(args\.attemptId, acquisitionAction\(key\)\)/);
+  });
+
+  it("no unknown is defaulted — no import date, no invented merchant", () => {
+    const s = code("src/features/import/ImportScreen.tsx");
+    expect(s).not.toMatch(/purchased_on:\s*new Date|purchased_on:\s*today/);
+    expect(s).not.toMatch(/source:\s*[^,]*"CSV import"/);
+  });
+
+  it("cost is summarised per currency and never added across them", () => {
+    const s = ACQ();
+    expect(s).toMatch(/costByCurrency/);
+    // Every accumulation is keyed by currency.
+    expect(s).toMatch(/byCurrency\.get\(g\.cost\.currency\)/);
+  });
+
+  it("previous-file detection matches the prefix, escaping LIKE wildcards", () => {
+    const s = readFileSync(
+      join(ROOT, "src/data/repositories/cellar-repository.ts"),
+      "utf8",
+    );
+    const fn = s.slice(s.indexOf("async findPriorImport"));
+    expect(fn.slice(0, 1200)).toMatch(/\.like\("reference"/);
+    expect(fn.slice(0, 1200)).toMatch(/replace\(\/\[\\\\%_\]\/g/);
+  });
+
+  it("the former whole-file currency block is gone", () => {
+    expect(code("src/domain/csv-import/status.ts")).not.toMatch(/markCurrencyConflicts/);
+  });
+});
+
+describe("Phase 11 — generic importer contract", () => {
+  const SCREEN = () => code("src/features/import/ImportScreen.tsx");
+
+  it("each item carries its own resolved storage location", () => {
+    expect(SCREEN()).toMatch(/storage_location_id: i\.storageLocationId/);
+  });
+
+  it("a location is resolved even when no position is given", () => {
+    const s = code("src/domain/csv-import/plan.ts");
+    expect(s).not.toMatch(/if \(row\.position && row\.storageLocation\)/);
+    expect(s).toMatch(/export function resolveLocation/);
+  });
+
+  it("a valuation reference is kept in the ledger's free-text notes", () => {
+    expect(SCREEN()).toMatch(/notes: `Source reference: \$\{v\.reference\}`/);
+  });
+
+  it("a non-type source is never forced into the source enum", () => {
+    const s = code("src/domain/csv-import/mappings.ts");
+    expect(s).toMatch(/reference: text/);
+    expect(s).not.toMatch(/UNREPRESENTABLE_SOURCES/);
+  });
+
+  it("legacy aliases live in the parser, never in the template", () => {
+    const t = code("src/domain/csv-import/template.ts");
+    expect(t).not.toMatch(/Sweet|retail_price|insurance_value|UK retail/);
+  });
+
+  it("the single-acquisition dead code is gone", () => {
+    const s = code("src/domain/csv-import/plan.ts");
+    expect(s).not.toMatch(/acquisitionOperationId|importReference =|acquisitions: items/);
+  });
+});

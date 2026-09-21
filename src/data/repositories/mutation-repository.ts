@@ -142,8 +142,17 @@ export class MutationRepository extends BaseRepository {
     occurredAt?: string;
     reason?: string;
     notes?: string;
+    /**
+     * A caller-supplied operation id, for work planned in advance.
+     *
+     * The CSV importer derives a STABLE id per logical action, so replaying a
+     * step that already succeeded is harmless through `claim_operation`
+     * rather than creating a second record. Omitted, a fresh id is minted as
+     * before.
+     */
+    operationId?: string;
   }): Promise<MutationOutcome> {
-    const opId = newId();
+    const opId = args.operationId ?? newId();
     const res = await this.callRpc<null>("change_bottle_status", {
       p_operation_id: opId,
       p_bottle_id: args.bottleId,
@@ -234,8 +243,17 @@ export class MutationRepository extends BaseRepository {
     notes?: string;
     tastedOn?: string;
     context?: string;
+    /**
+     * A caller-supplied operation id, for work planned in advance.
+     *
+     * The CSV importer derives a STABLE id per logical action, so replaying a
+     * step that already succeeded is harmless through `claim_operation`
+     * rather than creating a second record. Omitted, a fresh id is minted as
+     * before.
+     */
+    operationId?: string;
   }): Promise<MutationOutcome> {
-    const opId = newId();
+    const opId = args.operationId ?? newId();
     const res = await this.callRpc<string>("record_tasting", {
       p_operation_id: opId,
       p_cellar_id: this.cellarId,
@@ -275,8 +293,17 @@ export class MutationRepository extends BaseRepository {
     source?: "manual" | "merchant" | "auction_house" | "api" | "import";
     valuedOn?: string;
     notes?: string;
+    /**
+     * A caller-supplied operation id, for work planned in advance.
+     *
+     * The CSV importer derives a STABLE id per logical action, so replaying a
+     * step that already succeeded is harmless through `claim_operation`
+     * rather than creating a second record. Omitted, a fresh id is minted as
+     * before.
+     */
+    operationId?: string;
   }): Promise<MutationOutcome> {
-    const opId = newId();
+    const opId = args.operationId ?? newId();
     const res = await this.callRpc<string>("record_valuation", {
       p_operation_id: opId,
       p_cellar_id: this.cellarId,
@@ -614,6 +641,66 @@ export class MutationRepository extends BaseRepository {
     }
 
     return { delivered, failed, outcomes };
+  }
+
+  /**
+   * Create one wine definition with a caller-supplied operation id.
+   *
+   * Used by the CSV importer, which plans every mutation before writing so a
+   * retry replays rather than duplicates. `create_wine_definition` already
+   * accepts a client-supplied wine id and returns the ORIGINAL id on replay.
+   */
+  async createWineDefinition(args: {
+    operationId: string;
+    wine: Record<string, unknown>;
+  }): Promise<MutationOutcome> {
+    const res = await this.callRpc<string>("create_wine_definition", {
+      p_operation_id: args.operationId,
+      p_cellar_id: this.cellarId,
+      p_wine: args.wine,
+      p_device_id: this.deviceId(),
+    });
+
+    return {
+      ok: res.result === "applied" || res.result === "duplicate",
+      kind: "large",
+      operationId: args.operationId,
+      entityId: res.data ?? null,
+      error: res.error,
+      conflict: res.result === "conflict",
+    };
+  }
+
+  /**
+   * Create one acquisition and every bottle it contains.
+   *
+   * This is the only ATOMIC part of a CSV import: the RPC creates the
+   * acquisition, its items, one bottle row per unit of quantity and an
+   * `added` event for each, in a single transaction. An invalid position
+   * rolls the whole thing back, which is why the importer only ever sends
+   * positions it has already proven safe.
+   */
+  async createAcquisition(args: {
+    operationId: string;
+    acquisition: Record<string, unknown>;
+    items: Record<string, unknown>[];
+  }): Promise<MutationOutcome> {
+    const res = await this.callRpc<string>("create_acquisition_with_items", {
+      p_operation_id: args.operationId,
+      p_cellar_id: this.cellarId,
+      p_acquisition: args.acquisition,
+      p_items: args.items,
+      p_device_id: this.deviceId(),
+    });
+
+    return {
+      ok: res.result === "applied" || res.result === "duplicate",
+      kind: "large",
+      operationId: args.operationId,
+      entityId: res.data ?? null,
+      error: res.error,
+      conflict: res.result === "conflict",
+    };
   }
 
   // ── CONFLICT RESOLUTION ─────────────────────────────────────────────────

@@ -663,7 +663,7 @@ test("the history spec uses no service-role credential", () => {
 // is the dedicated E2E one before it writes anything.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const MUTATING_SPECS = ["home.spec.ts", "atlas.spec.ts"];
+const MUTATING_SPECS = ["home.spec.ts", "atlas.spec.ts", "csv-import.spec.ts"];
 
 test("every mutating E2E spec guards its target cellar", () => {
   for (const name of MUTATING_SPECS) {
@@ -679,8 +679,158 @@ test("every mutating E2E spec guards its target cellar", () => {
 
 test("no spec hard-codes the real cellar id", () => {
   const REAL_CELLAR = "a7283598-c94f-40b0-983a-871027c67867";
-  for (const name of readdirSync(join(process.cwd(), "tests/e2e"))) {
-    const src = readFileSync(join(process.cwd(), "tests/e2e", name), "utf8");
-    expect(src, `${name} references the real cellar`).not.toContain(REAL_CELLAR);
+
+  // Recursive, so fixture helpers under tests/e2e/ are scanned too. The flat
+  // version failed on the Phase 11 fixtures/ directory; skipping directories
+  // would have made it pass by scanning LESS, so it walks them instead.
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else files.push(full);
+    }
+  };
+  walk(join(process.cwd(), "tests/e2e"));
+
+  expect(files.length, "no e2e files were scanned").toBeGreaterThan(0);
+  expect(
+    files.some((f) => f.includes("fixtures")),
+    "the fixture directory must be covered",
+  ).toBe(true);
+
+  for (const file of files) {
+    const src = readFileSync(file, "utf8");
+    expect(src, `${file} references the real cellar`).not.toContain(REAL_CELLAR);
   }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 11 — CSV IMPORT ACCEPTANCE SPEC GUARDS
+// ═══════════════════════════════════════════════════════════════════════════
+
+const IMPORT_SPEC = readFileSync(
+  join(process.cwd(), "tests/e2e/csv-import.spec.ts"),
+  "utf8",
+);
+const IMPORT_FIXTURE = readFileSync(
+  join(process.cwd(), "tests/e2e/fixtures/phase11-csv.ts"),
+  "utf8",
+);
+
+test("the import spec REQUIRES E2E_CELLAR_ID", () => {
+  const c = code(IMPORT_SPEC);
+  expect(c).toMatch(/process\.env\.E2E_CELLAR_ID/);
+  expect(c).toMatch(/E2E_CELLAR_ID must be set before any mutating E2E test runs/);
+});
+
+test("the import spec checks EXACT membership, never the first cellar found", () => {
+  const c = code(IMPORT_SPEC);
+  expect(c).toMatch(/ids\.includes\(expected!\)/);
+  // A user in several cellars makes the target ambiguous, so it refuses.
+  expect(c).toMatch(/ids\.length,[\s\S]{0,160}toBe\(1\)/);
+  // No "limit=1" discovery that would pick an arbitrary cellar.
+  expect(c).not.toMatch(/cellar_members\?select=cellar_id&limit=1/);
+});
+
+test("the cellar is asserted BEFORE the import is confirmed", () => {
+  const c = code(IMPORT_SPEC);
+  const guard = c.lastIndexOf("await assertE2eCellar(page)");
+  const confirm = c.indexOf("await confirm.dblclick()");
+  expect(guard, "no cellar assertion found").toBeGreaterThan(-1);
+  expect(confirm, "no confirm action found").toBeGreaterThan(-1);
+  expect(guard, "the target must be proved before writing").toBeLessThan(confirm);
+});
+
+test("the import spec does not hard-code the real cellar", () => {
+  const REAL_CELLAR = "a7283598-c94f-40b0-983a-871027c67867";
+  expect(IMPORT_SPEC).not.toContain(REAL_CELLAR);
+  expect(IMPORT_FIXTURE).not.toContain(REAL_CELLAR);
+});
+
+test("the import spec uses no service-role credential", () => {
+  for (const src of [IMPORT_SPEC, IMPORT_FIXTURE]) {
+    expect(code(src)).not.toMatch(/service_role|serviceRole|SERVICE_ROLE/);
+  }
+});
+
+test("the import spec writes NOTHING directly — only through the browser UI", () => {
+  const c = code(IMPORT_SPEC);
+  // Its REST helper is read-only.
+  expect(c).toMatch(/method: "GET"/);
+  expect(c).not.toMatch(/method: "(POST|PATCH|PUT|DELETE)"/);
+  expect(c).not.toMatch(/rpc\/create_|rpc\/record_|rpc\/change_/);
+});
+
+test("the import spec drives the real workflow from More", () => {
+  const c = code(IMPORT_SPEC);
+  expect(c).toMatch(/getByRole\("link", \{ name: "More" \}\)/);
+  expect(c).toMatch(/Import wines/);
+  expect(c).toMatch(/setInputFiles\(/);
+});
+
+test("the only skip is the credential guard", () => {
+  const skips = code(IMPORT_SPEC).match(/test\.skip\(/g) ?? [];
+  expect(skips.length).toBe(1);
+  expect(code(IMPORT_SPEC)).not.toMatch(/test\.fixme|test\.only|\.skip\(true/);
+});
+
+test("the core acceptance assertions are all present", () => {
+  const c = code(IMPORT_SPEC);
+  for (const [what, pattern] of [
+    ["row count", /stat\("Rows read"[\s\S]{0,60}toHaveText\("4"\)/],
+    ["bottle count", /stat\("Bottles to create"[\s\S]{0,60}toHaveText\("6"\)/],
+    [
+      "bottles leaving shown",
+      /stat\("Bottles leaving the cellar"[\s\S]{0,60}toHaveText\("2"\)/,
+    ],
+    ["both consumed bottles move", /BOTH bottles must leave the cellar/],
+    ["added → consumed history", /"added",\s*"consumed"/],
+    ["consumed not active", /consumed bottles must not count as held/],
+    ["three acquisitions previewed", /"three purchases"/],
+    ["one cost line per currency", /exactly one line per currency/],
+    ["EUR purchase recorded as EUR", /currency: "EUR"/],
+    ["GBP purchase recorded as GBP", /currency: "GBP"/],
+    ["currencies are separate purchases", /EUR and GBP must be separate purchases/],
+    ["unknown date stays unknown", /unknown date stays unknown/],
+    ["unknown merchant stays unknown", /unknown merchant stays unknown/],
+    ["unknown price never zero", /unknown price stays NULL, never zero/],
+    ["replay creates no extra acquisitions", /exactly three acquisitions for this run/],
+    ["Sweet mapping visible", /"Sweet" will be recorded as "Dessert"/],
+    ["insurance skip visible", /The valuation will be skipped/],
+    ["explicit confirmation", /toBeDisabled\(\)/],
+    ["quantity 2 → two rows", /toHaveLength\(2\)/],
+    ["Dessert stored", /toBe\("Dessert"\)/],
+    ["insurance NOT created", /insurance_value must never be recorded/],
+    ["single valuation", /exactly one valuation/],
+    ["single tasting", /exactly one tasting/],
+  ] as const) {
+    expect(c, `missing assertion: ${what}`).toMatch(pattern);
+  }
+});
+
+test("the import spec waits on real signals, never a fixed delay", () => {
+  const c = code(IMPORT_SPEC);
+  expect(c).not.toMatch(/waitForTimeout|setTimeout|sleep\(/);
+  expect(c).not.toMatch(/\.catch\(async/);
+  expect(c).not.toMatch(/force:\s*true/);
+});
+
+test("the import spec normalises BASE", () => {
+  expect(IMPORT_SPEC).toMatch(
+    /const BASE = \(process\.env\.E2E_BASE_URL \?\? "[^"]+"\)\.replace\(/,
+  );
+});
+
+test("the import spec's browser callbacks stay serialisable", () => {
+  const c = code(IMPORT_SPEC);
+  // Every value a page.evaluate callback needs arrives as an argument, not
+  // through a closure, which Playwright cannot serialise.
+  expect(c).toMatch(/page\.evaluate\(\s*async \(args:/);
+  expect(c).not.toMatch(/import\.meta/);
+});
+
+test("the import fixture uses a unique marker per run", () => {
+  expect(code(IMPORT_SPEC)).toMatch(/const RUN = `P11-\$\{Date\.now\(\)/);
+  expect(code(IMPORT_FIXTURE)).toMatch(/\[E2E-TEST\]/);
 });
