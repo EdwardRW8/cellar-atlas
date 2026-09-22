@@ -435,8 +435,12 @@ if (row.storageLocation?.trim()) {
           else {
             const parsed = args.parsePositionKey(location.id, row.position);
             if (!parsed) reason = "invalid-for-layout";
-            else {
-              // Only the FIRST bottle of a multi-bottle row takes the slot.
+            else if (row.quantity > 1) {
+              // One CSV position cannot safely locate multiple bottles in a
+              // positioned layout. Import the whole item unpositioned rather
+              // than partially assigning storage.
+              reason = "invalid-for-layout";
+            } else {
               rowPositions[0] = parsed;
               claimed.add(row.position);
               claimedInFile.set(location.id, claimed);

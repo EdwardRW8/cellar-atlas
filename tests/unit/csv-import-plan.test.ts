@@ -391,15 +391,34 @@ describe("positions are only sent when proven safe", () => {
     expect(p.positions[0]!.reason).toBe("not-positioned");
   });
 
-  it("only the FIRST bottle of a multi-bottle row takes the slot", async () => {
+  it("does not assign positioned storage to a multi-bottle row with only one position", async () => {
     const p = await plan(
-      [row({ quantity: "6", storageLocation: "Cellar", position: "c1r1" })],
+      [
+        row({
+          quantity: "2",
+          storageLocation: "Cellar",
+          position: "c1r1",
+        }),
+      ],
+      { locations: [location()] },
+    );
+
+    expect(p.items[0]!.storageLocationId).toBeNull();
+    expect(p.items[0]!.positions).toEqual([null, null]);
+    expect(p.positions[0]!.resolved).toBe(false);
+    expect(p.positions[0]!.reason).toBe("invalid-for-layout");
+  });
+
+  it("a single-bottle row can take a valid positioned slot", async () => {
+    const p = await plan(
+      [row({ quantity: "1", storageLocation: "Cellar", position: "c1r1" })],
       {
         locations: [location()],
       },
     );
+    expect(p.items[0]!.storageLocationId).toBe("loc1");
     expect(p.items[0]!.positions[0]).not.toBeNull();
-    expect(p.items[0]!.positions.slice(1).every((x) => x === null)).toBe(true);
+    expect(p.positions[0]!.resolved).toBe(true);
   });
 
   it("matches a location name case-insensitively", async () => {
