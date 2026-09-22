@@ -247,7 +247,7 @@ function resolveGeography(
 
   // Prefer the deepest, most specific geography supplied by the CSV.
   const candidates = [
-    { value: row.appellation, level: "appellation" },
+    { value: row.appellation, level: undefined },
     { value: row.region, level: undefined },
     { value: row.country, level: "country" },
   ];

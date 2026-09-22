@@ -112,7 +112,50 @@ describe("deduplication", () => {
     expect(p.ambiguous).toEqual([]);
   });
 });
+describe("geography resolution", () => {
+  it("resolves a canonical region supplied as a CSV appellation", async () => {
+    const geography = new Map([
+      [
+        "napa-id",
+        {
+          id: "napa-id",
+          parent_id: "us-id",
+          level: "region",
+          name: "Napa Valley",
+          country_code: "US",
+        },
+      ],
+      [
+        "us-id",
+        {
+          id: "us-id",
+          parent_id: null,
+          level: "country",
+          name: "United States",
+          country_code: "US",
+        },
+      ],
+    ]);
 
+    const p = await plan(
+      [
+        row({
+          producer: "Duckhorn",
+          wineName: "Chardonnay",
+          country: "USA",
+          region: "California",
+          appellation: "Napa Valley",
+        }),
+      ],
+      { geography },
+    );
+
+    expect(p.winesToCreate).toHaveLength(1);
+    expect(p.winesToCreate[0]!.wine.geo_region_id).toBe("napa-id");
+    expect(p.winesToCreate[0]!.wine.country_code).toBe("US");
+    expect(p.winesToCreate[0]!.wine.region_text).toBeNull();
+  });
+});
 // ═══════════════════════════════════════════════════════════════════════════
 // BOTTLE-PER-ROW
 // ═══════════════════════════════════════════════════════════════════════════
