@@ -1,3 +1,4 @@
+import { isBottleSize } from "./bottle-size";
 /**
  * WineDraft — the single ingestion contract.
  *
@@ -231,6 +232,13 @@ export function validatePlacement(
   layoutType: string | null,
 ): DraftValidation {
   const errors: Record<string, string> = {};
+
+  // Any canonical <n>ml volume is valid; an unfinished or impossible custom
+  // volume is caught here, before submission, not by the database.
+  if (!isBottleSize(draft.bottleSize)) {
+    errors.bottleSize = "Enter the bottle volume as a whole number of millilitres";
+  }
+
   const positioned =
     layoutType !== null && !["unpositioned", "external"].includes(layoutType);
 

@@ -149,16 +149,19 @@ describe("bottle size: blank is not the same as invalid", () => {
   it("blank uses the documented default", () => {
     expect(mapBottleSize("").value).toBe("750ml");
   });
-  it("an unsupported size BLOCKS and names the supplied value", () => {
-    const m = mapBottleSize("200");
+  it("an INVALID size BLOCKS and names the supplied value", () => {
+    const m = mapBottleSize("0");
     expect(m.value).toBeNull();
-    expect(m.value === null && m.rejected.reason).toMatch(/"200"/);
+    expect(m.value === null && m.rejected.reason).toMatch(/"0"/);
   });
-  it("an unsupported size is NEVER silently turned into 750ml", () => {
+  it("an INVALID size is NEVER silently turned into 750ml", () => {
     const [r] = parseCsv(
-      ["Producer,Wine Name,Wine Type,Quantity,Bottle Size ml", "E,W,Red,1,200"].join("\n"),
+      ["Producer,Wine Name,Wine Type,Quantity,Bottle Size ml", "E,W,Red,1,abc"].join("\n"),
     ).rows;
     expect(r!.severity).toBe("invalid");
+  });
+  it("an uncommon but legitimate size is accepted, e.g. 200", () => {
+    expect(mapBottleSize("200").value).toBe("200ml");
   });
   it("every canonical size is accepted", () => {
     for (const ml of ["375", "750", "1500", "3000", "6000"])

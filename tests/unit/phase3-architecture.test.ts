@@ -539,7 +539,9 @@ describe("Phase 5 — additive domain only", () => {
     // migration since 014. This guard still catches an unapproved one.
     // 16 since Cleanup A added 016_mandatory_wine_type.sql. This guard still
     // catches an unapproved migration.
-    expect(migrations).toHaveLength(16);
+    // 17 since migration 017 (extensible bottle size) — approved. The guard
+    // still catches any UNAPPROVED migration.
+    expect(migrations).toHaveLength(17);
   });
 });
 
@@ -650,7 +652,9 @@ describe("Phase 6 — no new data access", () => {
     // migration since 014. This guard still catches an unapproved one.
     // 16 since Cleanup A added 016_mandatory_wine_type.sql. This guard still
     // catches an unapproved migration.
-    expect(migrations).toHaveLength(16);
+    // 17 since migration 017 (extensible bottle size) — approved. The guard
+    // still catches any UNAPPROVED migration.
+    expect(migrations).toHaveLength(17);
   });
 
   it("Phase 6 adds no mutation RPC", () => {
@@ -880,7 +884,9 @@ describe("Phase 7 — no backend change", () => {
     // migration since 014. This guard still catches an unapproved one.
     // 16 since Cleanup A added 016_mandatory_wine_type.sql. This guard still
     // catches an unapproved migration.
-    expect(migrations).toHaveLength(16);
+    // 17 since migration 017 (extensible bottle size) — approved. The guard
+    // still catches any UNAPPROVED migration.
+    expect(migrations).toHaveLength(17);
   });
 
   it("no new mutation RPC was added", () => {
@@ -1078,7 +1084,9 @@ describe("Phase 8 — no backend change", () => {
     // migration since 014. This guard still catches an unapproved one.
     // 16 since Cleanup A added 016_mandatory_wine_type.sql. This guard still
     // catches an unapproved migration.
-    expect(migrations).toHaveLength(16);
+    // 17 since migration 017 (extensible bottle size) — approved. The guard
+    // still catches any UNAPPROVED migration.
+    expect(migrations).toHaveLength(17);
   });
 
   it("the profile write uses the EXISTING RPC", () => {
@@ -1252,7 +1260,9 @@ describe("Phase 9 — migration 015", () => {
     );
     // 16 since Cleanup A added 016_mandatory_wine_type.sql. This guard still
     // catches an unapproved migration.
-    expect(migrations).toHaveLength(16);
+    // 17 since migration 017 (extensible bottle size) — approved. The guard
+    // still catches any UNAPPROVED migration.
+    expect(migrations).toHaveLength(17);
   });
 
   it("015 never writes to bottle_events", () => {
@@ -1370,7 +1380,9 @@ describe("Cleanup A — wine editing uses the established mutation path", () => 
     const migrations = readdirSync(join(ROOT, "db")).filter((f) =>
       /^\d{3}_.*\.sql$/.test(f),
     );
-    expect(migrations).toHaveLength(16);
+    // 17 since migration 017 (extensible bottle size) — approved. The guard
+    // still catches any UNAPPROVED migration.
+    expect(migrations).toHaveLength(17);
   });
 
   it("016 adds NO new RPC name — it replaces the existing two", () => {
@@ -1530,7 +1542,9 @@ describe("Phase 10 — the ledger stays append-only", () => {
     const migrations = readdirSync(join(ROOT, "db")).filter((f) =>
       /^\d{3}_.*\.sql$/.test(f),
     );
-    expect(migrations).toHaveLength(16);
+    // 17 since migration 017 (extensible bottle size) — approved. The guard
+    // still catches any UNAPPROVED migration.
+    expect(migrations).toHaveLength(17);
   });
 
   it("valuation reads go through the repository only", () => {
@@ -1625,7 +1639,9 @@ describe("Phase 10 — valuation scope", () => {
     const migrations = readdirSync(join(ROOT, "db")).filter((f) =>
       /^\d{3}_.*\.sql$/.test(f),
     );
-    expect(migrations).toHaveLength(16);
+    // 17 since migration 017 (extensible bottle size) — approved. The guard
+    // still catches any UNAPPROVED migration.
+    expect(migrations).toHaveLength(17);
     const s = readFileSync(
       join(ROOT, "src/data/repositories/mutation-repository.ts"),
       "utf8",
@@ -1757,7 +1773,9 @@ describe("Phase 11 — idempotency and audit", () => {
     const migrations = readdirSync(join(ROOT, "db")).filter((f) =>
       /^\d{3}_.*\.sql$/.test(f),
     );
-    expect(migrations).toHaveLength(16);
+    // 17 since migration 017 (extensible bottle size) — approved. The guard
+    // still catches any UNAPPROVED migration.
+    expect(migrations).toHaveLength(17);
   });
 
   it("no existing database constraint was altered", () => {
@@ -1858,7 +1876,9 @@ describe("Phase 11 — status transitions", () => {
     const migrations = readdirSync(join(ROOT, "db")).filter((f) =>
       /^\d{3}_.*\.sql$/.test(f),
     );
-    expect(migrations).toHaveLength(16);
+    // 17 since migration 017 (extensible bottle size) — approved. The guard
+    // still catches any UNAPPROVED migration.
+    expect(migrations).toHaveLength(17);
   });
 });
 

@@ -1,4 +1,12 @@
 import { useMemo, useState } from "react";
+import {
+  COMMON_BOTTLE_SIZES,
+  MIN_BOTTLE_ML,
+  MAX_BOTTLE_ML,
+  isBottleSize,
+  millilitresOf,
+  parseMillilitres,
+} from "@/domain/bottle-size";
 import { useNavigate } from "react-router-dom";
 import { useCellar } from "@/hooks/useCellar";
 import {
@@ -29,7 +37,6 @@ import { TOUCH_TARGET_MIN_PX } from "@/styles/tokens";
 const STEPS = ["Wine", "Details", "Bottles", "Review"] as const;
 
 const COLOURS: WineColour[] = ["Red", "White", "Rosé", "Sparkling", "Dessert", "Fortified"];
-const SIZES = ["375ml", "750ml", "1500ml", "3000ml", "6000ml"];
 
 export default function AddWineScreen() {
   const navigate = useNavigate();
@@ -534,21 +541,10 @@ function StepBottles({
         </div>
       </div>
 
-      <fieldset style={{ border: "none" }}>
-        <legend style={labelStyle}>Bottle size</legend>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {SIZES.map((s) => (
-            <button
-              key={s}
-              type="button"
-              style={chipStyle(draft.bottleSize === s)}
-              onClick={() => setDraft((d) => ({ ...d, bottleSize: s }))}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      </fieldset>
+      <BottleSizePicker
+        value={draft.bottleSize}
+        onChange={(bottleSize) => setDraft((d) => ({ ...d, bottleSize }))}
+      />
 
       <div>
         <label style={labelStyle}>Where are they going?</label>
@@ -828,4 +824,113 @@ function chipStyle(selected: boolean): React.CSSProperties {
     border: `1px solid ${selected ? "rgba(217,174,85,0.4)" : "var(--border-subtle)"}`,
     color: selected ? "var(--accent-gold)" : "var(--text-secondary)",
   };
+}
+
+/**
+ * Bottle size: common sizes as shortcuts, plus "Other…" for anything else.
+ *
+ * Common sizes are conveniences, not the permitted set. Choosing Other reveals
+ * a "Volume (ml)" field that takes a plain number — 500, not "500ml" — and the
+ * draft holds the canonical form. Until the number is a valid volume the draft
+ * holds an empty size, which placement validation refuses, so an unfinished
+ * custom size can never be submitted.
+ */
+export function BottleSizePicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (size: string) => void;
+}) {
+  const isCommon = (COMMON_BOTTLE_SIZES as readonly string[]).includes(value);
+  const [other, setOther] = useState(!isCommon);
+  const [ml, setMl] = useState(
+    !isCommon && isBottleSize(value) ? String(millilitresOf(value)) : "",
+  );
+  const invalid = other && ml.trim() !== "" && parseMillilitres(ml) === null;
+
+  return (
+    <fieldset style={{ border: "none" }}>
+      <legend style={labelStyle}>Bottle size</legend>
+      <div
+        role="radiogroup"
+        aria-label="Bottle size"
+        style={{ display: "flex", flexWrap: "wrap", gap: 6 }}
+      >
+        {COMMON_BOTTLE_SIZES.map((s) => (
+          <button
+            key={s}
+            type="button"
+            role="radio"
+            aria-checked={!other && value === s}
+            style={chipStyle(!other && value === s)}
+            onClick={() => {
+              setOther(false);
+              onChange(s);
+            }}
+          >
+            {s}
+          </button>
+        ))}
+        <button
+          type="button"
+          role="radio"
+          aria-checked={other}
+          style={chipStyle(other)}
+          onClick={() => {
+            setOther(true);
+            onChange(parseMillilitres(ml) ?? "");
+          }}
+        >
+          Other…
+        </button>
+      </div>
+
+      {other && (
+        <div style={{ marginTop: 10 }}>
+          <label htmlFor="bottle-volume-ml" style={labelStyle}>
+            Volume (ml)
+          </label>
+          <input
+            id="bottle-volume-ml"
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={ml}
+            placeholder="500"
+            aria-invalid={invalid}
+            aria-describedby="bottle-volume-help"
+            onChange={(e) => {
+              setMl(e.target.value);
+              // Canonical when valid; empty otherwise, which validation refuses.
+              onChange(parseMillilitres(e.target.value) ?? "");
+            }}
+            style={{
+              width: "100%",
+              minHeight: 44,
+              padding: "0.625rem 0.875rem",
+              borderRadius: 10,
+              background: "rgba(255,255,255,0.04)",
+              border: `1px solid ${invalid ? "var(--status-past)" : "var(--border-subtle)"}`,
+              color: "var(--text-primary)",
+              fontSize: "1rem",
+            }}
+          />
+          <p
+            id="bottle-volume-help"
+            role={invalid ? "alert" : undefined}
+            style={{
+              fontSize: "0.75rem",
+              marginTop: 6,
+              color: invalid ? "var(--status-past)" : "var(--text-tertiary)",
+            }}
+          >
+            {invalid
+              ? `Enter a whole number of millilitres from ${MIN_BOTTLE_ML} to ${MAX_BOTTLE_ML.toLocaleString("en-GB")}.`
+              : "A whole number of millilitres, such as 500. No need to type “ml”."}
+          </p>
+        </div>
+      )}
+    </fieldset>
+  );
 }

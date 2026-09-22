@@ -15,7 +15,7 @@
 import { COLUMNS } from "./parse";
 import {
   CANONICAL_WINE_TYPES,
-  CANONICAL_BOTTLE_SIZES,
+  COMMON_BOTTLE_SIZES,
   CANONICAL_BASES,
   CANONICAL_SOURCES,
 } from "./mappings";
@@ -114,7 +114,7 @@ export const FIELD_GUIDE: { field: string; guidance: string }[] = [
   { field: COLUMNS.grapes, guidance: "Separate with semicolons, not commas." },
   {
     field: COLUMNS.bottleSize,
-    guidance: `Millilitres. One of: ${CANONICAL_BOTTLE_SIZES.map((s) => s.replace("ml", "")).join(", ")}. Blank means 750. Any other size stops the import so it can be corrected.`,
+    guidance: `A whole number of millilitres, such as ${COMMON_BOTTLE_SIZES.map((size) => size.replace("ml", "")).join(", ")}. Any other volume is fine too. Blank means 750. Only whole millilitres are read — other units are not converted.`,
   },
   {
     field: COLUMNS.purchasePrice,

@@ -157,41 +157,37 @@ describe("the workbook is read in full", () => {
   });
 });
 
-describe("THE 200ml ROW BLOCKS the import — deliberately", () => {
-  const invalid = () => rows.filter((r) => r.severity === "invalid");
-
-  it("exactly ONE blocking row", () => {
-    expect(invalid()).toHaveLength(1);
+describe("THE 200ml ROW now imports — as 200ml (migration 017)", () => {
+  // Before migration 017 this row blocked the whole import, because bottle size
+  // was a closed list. 200ml is a genuine size; it is now recorded as it is.
+  it("NO blocking rows", () => {
+    expect(rows.filter((r) => r.severity === "invalid")).toEqual([]);
   });
-  it("it is the 200ml row, and the message names the value", () => {
-    const [r] = invalid();
-    expect(r!.producer).toBe("Pellar Estates");
-    expect(r!.issues.some((i) => /"200"/.test(i.message))).toBe(true);
+  it("the Pellar Estates row is recorded as 200ml — never 750ml", () => {
+    const r = rows.find((x) => x.producer === "Pellar Estates")!;
+    expect(r.bottleSize).toBe("200ml");
+    expect(plan.items.find((i) => i.lineNumber === r.lineNumber)!.bottleSize).toBe("200ml");
   });
-  it("it is NOT silently converted to 750ml", () => {
-    expect(invalid()[0]!.issues.some((i) => i.column === COLUMNS.bottleSize)).toBe(true);
-  });
-  it("confirmation is refused until it is resolved", () => {
-    expect(canConfirm(plan)).toBe(false);
+  it("confirmation is allowed", () => {
+    expect(canConfirm(plan)).toBe(true);
   });
 });
 
-describe("the 72 importable rows", () => {
+describe("all 73 rows import", () => {
   const ok = () => rows.filter((r) => r.severity !== "invalid");
 
-  it("create 174 bottles (177 less the blocked row's 3)", () => {
-    expect(plan.counts.bottlesToCreate).toBe(174);
+  it("create all 177 bottles", () => {
+    expect(plan.counts.bottlesToCreate).toBe(177);
   });
-  it("carry 72 valuations, every basis canonical", () => {
-    expect(plan.valuations).toHaveLength(72);
+  it("carry 73 valuations, every basis canonical", () => {
+    expect(plan.valuations).toHaveLength(73);
     const bases = new Set(plan.valuations.map((v) => v.basis));
     expect([...bases].sort()).toEqual(["market_estimate", "merchant_retail"]);
   });
   it("keep 54/19 legacy wording mapped explicitly, not dropped", () => {
     const m = plan.valuations.filter((v) => v.basis === "market_estimate").length;
     const r = plan.valuations.filter((v) => v.basis === "merchant_retail").length;
-    // the blocked 200ml row carried the first, "Estimated…" basis
-    expect([m, r]).toEqual([53, 19]);
+    expect([m, r]).toEqual([54, 19]);
   });
   it("keep every URL as a REFERENCE, never as a source type", () => {
     for (const v of plan.valuations) {
@@ -221,8 +217,8 @@ describe("the 72 importable rows", () => {
 describe("storage: generic matching gives the right result", () => {
   const where = (id: string | null) =>
     plan.items.filter((i) => i.storageLocationId === id).length;
-  it("Cellar + cellar resolve to the same location (56 + 2)", () => {
-    expect(where("cellar")).toBe(58);
+  it("Cellar + cellar resolve to the same location (57 + 2)", () => {
+    expect(where("cellar")).toBe(59);
   });
   it("The Wine Society and BBR resolve", () => {
     expect(where("tws")).toBe(7);
@@ -238,7 +234,7 @@ describe("storage: generic matching gives the right result", () => {
 });
 
 describe("NO PURCHASE HISTORY IS FABRICATED", () => {
-  it("every row forms ONE unknown-provenance acquisition, not 72", () => {
+  it("every row forms ONE unknown-provenance acquisition, not 73", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]!.identity).toEqual({
       purchasedOn: null,
@@ -256,8 +252,8 @@ describe("NO PURCHASE HISTORY IS FABRICATED", () => {
   });
   it("the preview counts every row's missing purchase facts", () => {
     const s = summariseAcquisitions(groups, rows);
-    expect(s.rowsWithUnknownDate).toBe(72);
-    expect(s.rowsWithUnknownMerchant).toBe(72);
-    expect(s.rowsWithUnknownPrice).toBe(72);
+    expect(s.rowsWithUnknownDate).toBe(73);
+    expect(s.rowsWithUnknownMerchant).toBe(73);
+    expect(s.rowsWithUnknownPrice).toBe(73);
   });
 });

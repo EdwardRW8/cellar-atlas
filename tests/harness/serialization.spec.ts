@@ -727,8 +727,10 @@ test("the import spec REQUIRES E2E_CELLAR_ID", () => {
 test("the import spec checks EXACT membership, never the first cellar found", () => {
   const c = code(IMPORT_SPEC);
   expect(c).toMatch(/ids\.includes\(expected!\)/);
-  // A user in several cellars makes the target ambiguous, so it refuses.
-  expect(c).toMatch(/ids\.length,[\s\S]{0,160}toBe\(1\)/);
+  // The configured target must be the dedicated E2E Test Cellar, even when
+  // the signed-in user belongs to several cellars.
+  expect(c).toMatch(/toBe\(E2E_TEST_CELLAR_ID\)/);
+  expect(c).toMatch(/toContain\(expected\)/);
   // No "limit=1" discovery that would pick an arbitrary cellar.
   expect(c).not.toMatch(/cellar_members\?select=cellar_id&limit=1/);
 });

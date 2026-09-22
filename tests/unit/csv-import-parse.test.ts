@@ -184,8 +184,14 @@ describe("bottle size, status and currency", () => {
     expect(mapBottleSize("1500").value).toBe("1500ml");
   });
 
-  it("an unsupported size is rejected", () => {
-    expect(isRejected(mapBottleSize("500"))).toBe(true);
+  it("an uncommon but legitimate size is ACCEPTED (migration 017)", () => {
+    // Previously asserted 500 was rejected — the closed list this patch removes.
+    expect(mapBottleSize("500").value).toBe("500ml");
+  });
+
+  it("a malformed size is rejected", () => {
+    expect(isRejected(mapBottleSize("abc"))).toBe(true);
+    expect(isRejected(mapBottleSize("0"))).toBe(true);
   });
 
   it('"In cellar" maps to in_cellar', () => {

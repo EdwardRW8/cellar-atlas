@@ -1,3 +1,10 @@
+import {
+  bottleSizeFromMl,
+  DEFAULT_BOTTLE_SIZE,
+  MIN_BOTTLE_ML,
+  MAX_BOTTLE_ML,
+} from "../bottle-size";
+
 /**
  * Workbook → canonical mappings.
  *
@@ -28,14 +35,11 @@ export const CANONICAL_WINE_TYPES = [
 ] as const;
 export type WineType = (typeof CANONICAL_WINE_TYPES)[number];
 
-/** migration 007: bottle_size CHECK. */
-export const CANONICAL_BOTTLE_SIZES = [
-  "375ml",
-  "750ml",
-  "1500ml",
-  "3000ml",
-  "6000ml",
-] as const;
+/**
+ * Common bottle sizes: quick-select choices in the template guidance. NOT a
+ * whitelist — any whole number of millilitres within bounds is accepted.
+ */
+export { COMMON_BOTTLE_SIZES } from "../bottle-size";
 
 /** migration 007: status CHECK. The workbook uses three of the six. */
 export const CANONICAL_STATUSES = [
@@ -143,24 +147,28 @@ export function mapWineType(raw: string): MapResult<WineType> {
 /** The workbook supplies millilitres as a number; the column stores a label. */
 export function mapBottleSize(raw: string): MapResult<string> {
   const text = raw.trim();
-  if (!text) return { value: "750ml" };
+  // Blank keeps the documented default. Blank is NOT the same as invalid.
+  if (!text) return { value: DEFAULT_BOTTLE_SIZE };
 
+  // Tolerance kept exactly as before: an optional trailing "ml", in any case,
+  // with or without a space. No other unit is interpreted — "75cl" or "0.75"
+  // are refused, never converted, so a size is never guessed.
   const digits = text.replace(/\s*ml\s*$/i, "").trim();
-  const label = `${digits}ml`;
+  const size = /^[0-9]+$/.test(digits) ? bottleSizeFromMl(Number(digits)) : null;
 
-  if ((CANONICAL_BOTTLE_SIZES as readonly string[]).includes(label)) {
-    return label === text
-      ? { value: label }
-      : { value: label, alias: { from: text, to: label } };
+  if (size) {
+    return size === text
+      ? { value: size }
+      : { value: size, alias: { from: text, to: size } };
   }
 
+  // An explicit size that is not a valid volume BLOCKS the row and names the
+  // value supplied. It is never quietly replaced with 750ml.
   return {
     value: null,
     rejected: {
       from: text,
-      // Names the supplied value. An unsupported size BLOCKS the row; it is
-      // never quietly replaced with 750ml.
-      reason: `"${text}" is not a supported bottle size. Use one of: ${CANONICAL_BOTTLE_SIZES.join(", ")}`,
+      reason: `"${text}" is not a valid bottle size. Give a whole number of millilitres between ${MIN_BOTTLE_ML} and ${MAX_BOTTLE_ML.toLocaleString("en-GB")}, such as 375 or 750.`,
     },
   };
 }

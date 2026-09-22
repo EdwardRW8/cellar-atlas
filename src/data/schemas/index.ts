@@ -1,3 +1,4 @@
+import { isBottleSize } from "@/domain/bottle-size";
 /**
  * Zod schemas — the boundary between the database and the domain.
  *
@@ -19,7 +20,13 @@ export const numericSchema = z.union([z.string(), z.number()]).nullable();
 
 export const currencySchema = z.string().length(3);
 
-export const bottleSizeSchema = z.enum(["375ml", "750ml", "1500ml", "3000ml", "6000ml"]);
+/**
+ * Canonical `<positive integer>ml`, 1–50,000 ml. Replaces a closed enum: common
+ * sizes are UI shortcuts, not the set of permitted sizes.
+ */
+export const bottleSizeSchema = z.string().refine(isBottleSize, {
+  message: "Bottle size must be a whole number of millilitres, e.g. 750ml",
+});
 
 export const wineColourSchema = z.enum([
   "Red",

@@ -5,7 +5,9 @@ export type WineColour = "Red" | "White" | "Rosé" | "Sparkling" | "Dessert" | "
 export type BottleStatus =
   "in_cellar" | "consumed" | "gifted" | "sold" | "lost" | "removed";
 
-export type BottleSize = "375ml" | "750ml" | "1500ml" | "3000ml" | "6000ml";
+/** Any canonical `<n>ml` volume — see domain/bottle-size.ts. Not a closed list. */
+export type { BottleSize } from "../bottle-size";
+import type { BottleSize } from "../bottle-size";
 
 export interface Money {
   amount: number;
