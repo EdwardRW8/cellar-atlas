@@ -155,6 +155,66 @@ describe("geography resolution", () => {
     expect(p.winesToCreate[0]!.wine.country_code).toBe("US");
     expect(p.winesToCreate[0]!.wine.region_text).toBeNull();
   });
+  it("resolves Mount Veeder to canonical Mt. Veeder", async () => {
+    const geography = new Map([
+      [
+        "mt-veeder-id",
+        {
+          id: "mt-veeder-id",
+          parent_id: "napa-id",
+          level: "appellation",
+          name: "Mt. Veeder",
+          country_code: "US",
+        },
+      ],
+    ]);
+
+    const p = await plan(
+      [
+        row({
+          country: "USA",
+          region: "California",
+          appellation: "Mount Veeder",
+        }),
+      ],
+      { geography },
+    );
+
+    expect(p.winesToCreate[0]!.wine.geo_region_id).toBe("mt-veeder-id");
+    expect(p.winesToCreate[0]!.wine.country_code).toBe("US");
+    expect(p.winesToCreate[0]!.wine.region_text).toBeNull();
+  });
+
+  it("resolves Sonoma County to canonical Sonoma", async () => {
+    const geography = new Map([
+      [
+        "sonoma-id",
+        {
+          id: "sonoma-id",
+          parent_id: "california-id",
+          level: "region",
+          name: "Sonoma",
+          country_code: "US",
+        },
+      ],
+    ]);
+
+    const p = await plan(
+      [
+        row({
+          country: "USA",
+          region: "California",
+          appellation: "Sonoma County",
+        }),
+      ],
+      { geography },
+    );
+
+    expect(p.winesToCreate[0]!.wine.geo_region_id).toBe("sonoma-id");
+    expect(p.winesToCreate[0]!.wine.country_code).toBe("US");
+    expect(p.winesToCreate[0]!.wine.region_text).toBeNull();
+  });
+
 });
 // ═══════════════════════════════════════════════════════════════════════════
 // BOTTLE-PER-ROW

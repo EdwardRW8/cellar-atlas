@@ -39,7 +39,7 @@ export interface GeoRow {
 }
 
 /** Walk a region up to its country, so Atlas and filters can aggregate. */
-function buildGeoPath(
+export function buildGeoPath(
   geoRegionId: string | null,
   regionText: string | null,
   index: Map<string, GeoRow>,
@@ -56,7 +56,7 @@ function buildGeoPath(
     if (node.level === "country") {
       path.country = { id: node.id, name: node.name, code: node.country_code };
     } else if (node.level === "region") {
-      path.region = { id: node.id, name: node.name };
+      if (!path.region) path.region = { id: node.id, name: node.name };
     } else if (node.level === "appellation" || node.level === "subregion") {
       if (!path.appellation) path.appellation = { id: node.id, name: node.name };
     }

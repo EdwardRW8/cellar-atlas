@@ -296,8 +296,8 @@ describe("read-only guarantees", () => {
     expect(files.length).toBeGreaterThan(0);
     const { readdirSync } = require("node:fs") as typeof import("node:fs");
     const migrations = readdirSync(DB_DIR).filter((f) => /^\d{3}_.*\.sql$/.test(f));
-    // 17 since migration 017 (extensible bottle size) — approved. The guard
+    // 18 since migration 018 (California geography) — approved. The guard
     // still catches any UNAPPROVED migration.
-    expect(migrations).toHaveLength(17);
+    expect(migrations).toHaveLength(18);
   });
 });

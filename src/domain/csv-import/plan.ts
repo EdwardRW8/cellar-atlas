@@ -233,10 +233,19 @@ function resolveGeography(
 
   const normalise = (value: string) => value.trim().toLocaleLowerCase();
 
+  // Explicit aliases only where both names denote the same geography.
+  // Keep this deliberately small: unknown geography remains free text rather
+  // than being guessed into the canonical hierarchy.
+  const geographyAliases: Record<string, string> = {
+    "mount veeder": "Mt. Veeder",
+    "sonoma county": "Sonoma",
+  };
+
   const exactMatches = (value: string | null, level?: string) => {
     if (!value) return [];
 
-    const wanted = normalise(value);
+    const normalised = normalise(value);
+    const wanted = normalise(geographyAliases[normalised] ?? value);
 
     return nodes.filter(
       (node) =>
