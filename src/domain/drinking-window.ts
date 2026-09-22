@@ -100,13 +100,13 @@ export function assessWindow(
       };
     }
     return {
-      state: progress >= 0.25 ? "peak" : "ready",
-      indicator: "ready",
-      yearsToOpen,
-      yearsToClose,
-      progress,
-      label: progress >= 0.25 ? "At peak" : "Ready to drink",
-    };
+  state: "ready",
+  indicator: "ready",
+  yearsToOpen,
+  yearsToClose,
+  progress,
+  label: "Ready to drink",
+};
   }
 
   // Only one bound known.

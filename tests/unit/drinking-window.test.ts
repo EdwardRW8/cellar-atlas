@@ -22,8 +22,8 @@ describe("drinking window states", () => {
     expect(assessWindow({ from: 2025, until: 2045 }, YEAR).state).toBe("ready");
   });
 
-  it("peak in the middle of the window", () => {
-    expect(assessWindow({ from: 2016, until: 2036 }, YEAR).state).toBe("peak");
+  it("ready in the middle of the window", () => {
+    expect(assessWindow({ from: 2016, until: 2036 }, YEAR).state).toBe("ready");
   });
 
   it("lateWindow in the final quarter", () => {
