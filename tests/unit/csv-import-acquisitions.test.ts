@@ -60,6 +60,7 @@ async function planFor(csv: string, attemptId = "attempt-1", fp = "f".repeat(64)
     attemptId,
     fingerprint: fp,
     existingWines: [],
+    geography: new Map(),
     locations: [],
     newId: () => crypto.randomUUID(),
     parsePositionKey: () => null,

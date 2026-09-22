@@ -25,6 +25,7 @@
  */
 
 import type { ParsedRow } from "./parse";
+import type { GeoRow } from "@/data/repositories/cellar-repository";
 
 // ── IDENTITY ──────────────────────────────────────────────────────────────
 
@@ -220,16 +221,82 @@ export interface ImportPlan {
  * confirmation while any remain, so this exclusion is a safety net rather
  * than the mechanism.
  */
+function resolveGeography(
+  row: ParsedRow,
+  geography: Map<string, GeoRow>,
+): {
+  geoRegionId: string | null;
+  countryCode: string | null;
+  regionText: string | null;
+} {
+  const nodes = [...geography.values()];
+
+  const normalise = (value: string) => value.trim().toLocaleLowerCase();
+
+  const exactMatches = (value: string | null, level?: string) => {
+    if (!value) return [];
+
+    const wanted = normalise(value);
+
+    return nodes.filter(
+      (node) =>
+        normalise(node.name) === wanted &&
+        (!level || node.level === level),
+    );
+  };
+
+  // Prefer the deepest, most specific geography supplied by the CSV.
+  const candidates = [
+    { value: row.appellation, level: "appellation" },
+    { value: row.region, level: undefined },
+    { value: row.country, level: "country" },
+  ];
+
+  for (const candidate of candidates) {
+    let matches = exactMatches(candidate.value, candidate.level);
+
+    // Country is useful for disambiguating otherwise identical place names.
+    if (row.country) {
+  const countryMatches = exactMatches(row.country, "country");
+  const countryMatch = countryMatches[0];
+
+  if (countryMatches.length === 1 && countryMatch) {
+    matches = matches.filter(
+      (match) => match.country_code === countryMatch.country_code,
+    );
+  }
+}
+
+const match = matches[0];
+
+if (matches.length === 1 && match) {
+  return {
+    geoRegionId: match.id,
+    countryCode: match.country_code,
+    regionText: null,
+  };
+}
+  }
+
+  // No unique canonical match: preserve the most useful supplied text rather
+  // than guessing. Atlas will surface it for later review.
+  return {
+    geoRegionId: null,
+    countryCode: null,
+    regionText: row.appellation ?? row.region ?? row.country,
+  };
+}
 export async function planImport(args: {
   rows: ParsedRow[];
   attemptId: string;
   fingerprint: string;
   existingWines: ExistingWine[];
+  geography: Map<string, GeoRow>;
   locations: ExistingLocation[];
   newId: () => string;
   parsePositionKey: (locationId: string, key: string) => Record<string, number> | null;
 }): Promise<ImportPlan> {
-  const { rows, attemptId, fingerprint, existingWines, locations, newId } = args;
+  const { rows, attemptId, fingerprint, existingWines, geography, locations, newId } = args;
 
   const importable = rows.filter((r) => r.severity !== "invalid");
 
@@ -265,6 +332,7 @@ export async function planImport(args: {
       createdMap.get(key)!.lineNumbers.push(row.lineNumber);
     } else {
       const wineId = newId();
+      const geo = resolveGeography(row, geography);
       const planned: PlannedWine = {
         key,
         id: wineId,
@@ -280,8 +348,9 @@ export async function planImport(args: {
           vintage: row.vintage,
           colour: row.wineType,
           grapes: row.grapes,
-          country_code: null,
-          region_text: row.region ?? row.appellation ?? row.country,
+          geo_region_id: geo.geoRegionId,
+country_code: geo.countryCode,
+region_text: geo.regionText,
           drink_from: row.drinkFrom,
           drink_until: row.drinkUntil,
           notes: row.notes,

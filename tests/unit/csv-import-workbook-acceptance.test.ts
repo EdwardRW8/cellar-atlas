@@ -135,6 +135,7 @@ beforeAll(async () => {
     attemptId: "wb",
     fingerprint: "e".repeat(64),
     existingWines: [],
+    geography: new Map(),
     locations: LOCATIONS,
     newId: () => crypto.randomUUID(),
     parsePositionKey: () => null,

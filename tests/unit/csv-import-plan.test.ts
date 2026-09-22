@@ -40,6 +40,7 @@ const plan = (rows: ReturnType<typeof row>[], over: Record<string, unknown> = {}
     attemptId: "attempt-1",
     fingerprint: "fp",
     existingWines: [],
+    geography: new Map(),
     locations: [],
     newId,
     parsePositionKey: (_l, key) => {

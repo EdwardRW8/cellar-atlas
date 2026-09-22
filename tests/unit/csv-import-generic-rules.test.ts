@@ -39,6 +39,7 @@ async function plan(csv: string, locations: ExistingLocation[] = []) {
     attemptId: "a",
     fingerprint: "f".repeat(64),
     existingWines: [],
+    geography: new Map(),
     locations,
     newId: () => crypto.randomUUID(),
     parsePositionKey: () => ({ col: 1, row: 1 }),

@@ -30,7 +30,7 @@ import type {
   BottleSize,
 } from "@/domain/types";
 
-interface GeoRow {
+export interface GeoRow {
   id: string;
   parent_id: string | null;
   level: string;
@@ -102,7 +102,7 @@ export class CellarRepository {
     return created.id as string;
   }
 
-  private async geoIndex(): Promise<Map<string, GeoRow>> {
+  async loadGeographyIndex(): Promise<Map<string, GeoRow>> {
     const { data, error } = await this.sb
       .from("geo_regions")
       .select("id, parent_id, level, name, country_code");
@@ -116,7 +116,7 @@ export class CellarRepository {
     bottles: DomainBottle[];
     locations: DomainStorageLocation[];
   }> {
-    const geo = await this.geoIndex();
+    const geo = await this.loadGeographyIndex();
 
     const [wineRes, bottleRes, locRes] = await Promise.all([
       this.sb

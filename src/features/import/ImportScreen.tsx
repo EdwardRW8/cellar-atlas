@@ -188,6 +188,7 @@ export default function ImportScreen() {
     const attemptId = crypto.randomUUID();
 
     const existingWines = repository ? await repository.loadWineIdentities() : [];
+    const geography = repository ? await repository.loadGeographyIndex() : new Map();
 
     // Persistent duplicate protection: survives reload, session and device.
     if (repository) {
@@ -204,6 +205,7 @@ export default function ImportScreen() {
       attemptId,
       fingerprint,
       existingWines,
+      geography,
       locations: plannerLocations,
       newId: () => crypto.randomUUID(),
       parsePositionKey,
