@@ -217,19 +217,22 @@ describe("all 73 rows import", () => {
 describe("storage: generic matching gives the right result", () => {
   const where = (id: string | null) =>
     plan.items.filter((i) => i.storageLocationId === id).length;
-  it("Cellar + cellar resolve to the same location (57 + 2)", () => {
-    expect(where("cellar")).toBe(59);
+    it("Cellar + cellar are left unlocated when the positioned layout has no supplied position", () => {
+    expect(where("cellar")).toBe(0);
   });
+
   it("The Wine Society and BBR resolve", () => {
     expect(where("tws")).toBe(7);
     expect(where("bbr")).toBe(5);
   });
-  it("the 2 blank rows are unlocated", () => {
-    expect(where(null)).toBe(2);
+
+  it("blank storage plus positioned Cellar rows are safely unlocated", () => {
+    expect(where(null)).toBe(61);
   });
-  it("nothing is positioned and nothing is unresolved", () => {
+
+  it("nothing is positioned and the 59 Cellar rows are reported unresolved", () => {
     expect(plan.items.every((i) => i.positions.every((p) => p === null))).toBe(true);
-    expect(plan.counts.unresolvedPositions).toBe(0);
+    expect(plan.counts.unresolvedPositions).toBe(59);
   });
 });
 
