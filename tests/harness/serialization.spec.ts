@@ -836,3 +836,258 @@ test("the import fixture uses a unique marker per run", () => {
   expect(code(IMPORT_SPEC)).toMatch(/const RUN = `P11-\$\{Date\.now\(\)/);
   expect(code(IMPORT_FIXTURE)).toMatch(/\[E2E-TEST\]/);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 12.0 — EVERY MUTATING E2E SPEC MUST GUARD ITS TARGET CELLAR
+//
+// The previous guard walked a HAND-MAINTAINED list of three specs, so
+// mobile-workflows and rls-jwt were never checked: both seeded data into
+// whatever cellar `cellar_members?limit=1` returned first. A list cannot
+// notice a spec nobody added to it.
+//
+// This derives the set of mutating specs from the specs THEMSELVES, so a new
+// one is covered the moment it is written.
+// ═══════════════════════════════════════════════════════════════════════════
+
+import {
+  verifyE2eCellar,
+  verifyAppTargetsE2eCellar,
+  verifyForeignCellar,
+} from "../e2e/fixtures/cellar-guard";
+
+/** Every *.spec.ts under tests/e2e, recursively. */
+function e2eSpecFiles(): string[] {
+  const out: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith(".spec.ts")) out.push(full);
+    }
+  };
+  walk(join(process.cwd(), "tests/e2e"));
+  return out.sort();
+}
+
+/**
+ * Does this spec attempt to CHANGE anything?
+ *
+ * An attempt counts even when the test expects RLS to refuse it: if RLS ever
+ * regressed, the write would land somewhere. Comments are stripped first, so
+ * prose describing a mutation never marks a read-only spec as mutating.
+ */
+export function detectMutations(source: string): string[] {
+  const src = code(source);
+  const signals: [string, RegExp][] = [
+    [
+      "write RPC",
+      /rpc\/(create|record|change|move|update|correct|soft_delete|delete|deliver|upsert)\w*/,
+    ],
+    ["non-GET request", /method:\s*["'](POST|PATCH|PUT|DELETE)["']/],
+    ["file upload", /\.setInputFiles\(/],
+  ];
+
+  const found = signals.filter(([, re]) => re.test(src)).map(([name]) => name);
+  if (clicksAMutationButton(src)) found.push("mutation button");
+  return found;
+}
+
+/** Verbs that name a control which changes data when clicked. */
+const MUTATION_VERB =
+  /\b(save|consume|deliver|import|confirm|remove|delete|gift|sell|record|move|add)\b/i;
+
+/**
+ * A mutation button only counts when it is actually CLICKED.
+ *
+ * Read-only specs deliberately assert that such controls are ABSENT — e.g.
+ * `getByRole("button", { name: /^remove$/i })` with `toHaveCount(0)`. Matching
+ * the locator alone marked those specs as mutating, which was wrong.
+ */
+function clicksAMutationButton(src: string): boolean {
+  // Clicked in the same statement: getByRole("button", {name: /save/}).click()
+  const direct =
+    /getByRole\(\s*["']button["'][\s\S]{0,140}?name:\s*\/[^/]*[\s\S]{0,140}?\.(click|dblclick)\(/gi;
+  for (const m of src.matchAll(direct)) {
+    if (MUTATION_VERB.test(m[0])) return true;
+  }
+
+  // Assigned first, clicked later: const confirm = ...getByRole("button", ...)
+  const assigned =
+    /(?:const|let)\s+(\w+)\s*=[\s\S]{0,160}?getByRole\(\s*["']button["'][\s\S]{0,140}?name:\s*\/[^/]*\//gi;
+  for (const m of src.matchAll(assigned)) {
+    if (!MUTATION_VERB.test(m[0])) continue;
+    if (new RegExp(`\\b${m[1]}\\s*\\.(click|dblclick)\\(`).test(src)) return true;
+  }
+  return false;
+}
+
+/** Does the spec establish its target cellar before mutating? */
+function isGuarded(source: string): boolean {
+  const src = code(source);
+  return (
+    /E2E_CELLAR_ID/.test(src) ||
+    /verifyE2eCellar\(|verifyAppTargetsE2eCellar\(|guardedCellarId\(|assertGuardedCellar\(|assertAppTargetsGuardedCellar\(/.test(
+      src,
+    )
+  );
+}
+
+test("every mutating E2E spec guards its target cellar — detected, not listed", () => {
+  const unguarded: string[] = [];
+  let mutatingCount = 0;
+
+  for (const file of e2eSpecFiles()) {
+    const src = readFileSync(file, "utf8");
+    const signals = detectMutations(src);
+    if (signals.length === 0) continue;
+    mutatingCount += 1;
+    if (!isGuarded(src)) unguarded.push(`${file} (${signals.join(", ")})`);
+  }
+
+  expect(
+    mutatingCount,
+    "no mutating specs detected — the detector is broken",
+  ).toBeGreaterThan(0);
+  expect(unguarded, "mutating E2E specs with no cellar guard").toEqual([]);
+});
+
+test("the detector recognises the specs we know mutate", () => {
+  const byName = new Map(
+    e2eSpecFiles().map((f) => [
+      f.split("/").pop()!,
+      detectMutations(readFileSync(f, "utf8")),
+    ]),
+  );
+  for (const name of [
+    "home.spec.ts",
+    "atlas.spec.ts",
+    "csv-import.spec.ts",
+    "mobile-workflows.spec.ts",
+    "rls-jwt.spec.ts",
+  ]) {
+    expect(
+      byName.get(name)?.length ?? 0,
+      `${name} should be detected as mutating`,
+    ).toBeGreaterThan(0);
+  }
+});
+
+test("NEGATIVE SELF-TEST: the detector is not vacuous", () => {
+  // A mutating spec with no guard must be caught...
+  const unguarded = `
+    import { test } from "@playwright/test";
+    test("seeds", async ({ page }) => {
+      await restRequest(page, "rpc/create_wine_definition", { method: "POST" });
+    });`;
+  expect(detectMutations(unguarded).length).toBeGreaterThan(0);
+  expect(isGuarded(unguarded)).toBe(false);
+
+  // ...and the same spec WITH a guard must pass.
+  expect(isGuarded(unguarded + "\nconst x = process.env.E2E_CELLAR_ID;")).toBe(true);
+
+  // A UI-only mutation counts, even with no RPC call.
+  expect(
+    detectMutations(`await page.getByRole("button", { name: /^save changes$/i }).click();`)
+      .length,
+  ).toBeGreaterThan(0);
+
+  // Prose about mutating must NOT mark a read-only spec as mutating.
+  expect(
+    detectMutations(
+      `// this spec never calls rpc/create_wine_definition\nawait page.goto(BASE);`,
+    ),
+  ).toEqual([]);
+
+  // A genuinely read-only spec is not flagged.
+  expect(detectMutations(`const r = await fetch(url, { method: "GET" });`)).toEqual([]);
+});
+
+test("the hand-maintained list is a SUBSET of what is detected", () => {
+  // The old list stays as a second opinion; it must never claim a spec the
+  // detector does not also see.
+  const detected = new Set(
+    e2eSpecFiles()
+      .filter((f) => detectMutations(readFileSync(f, "utf8")).length > 0)
+      .map((f) => f.split("/").pop()!),
+  );
+  for (const name of MUTATING_SPECS) expect(detected.has(name), `${name}`).toBe(true);
+});
+
+// ── The guard's own rules ──────────────────────────────────────────────────
+
+test("verifyE2eCellar accepts the configured cellar among several memberships", () => {
+  expect(verifyE2eCellar(["e2e"], "e2e")).toBe("e2e");
+  // Duplicated rows for one cellar (co-members) are still one cellar.
+  expect(verifyE2eCellar(["e2e", "e2e", "e2e"], "e2e")).toBe("e2e");
+  // An E2E account may legitimately belong to more than one cellar. What
+  // matters is that the TARGET is the configured one, not the membership count.
+  expect(verifyE2eCellar(["e2e", "another-cellar"], "e2e")).toBe("e2e");
+  expect(verifyE2eCellar(["another-cellar", "e2e"], "e2e")).toBe("e2e");
+  expect(verifyE2eCellar(["  e2e  "], "e2e")).toBe("e2e");
+});
+
+test("verifyE2eCellar refuses every unsafe case", () => {
+  expect(() => verifyE2eCellar(["e2e"], undefined)).toThrow(/E2E_CELLAR_ID must be set/);
+  expect(() => verifyE2eCellar(["e2e"], "  ")).toThrow(/E2E_CELLAR_ID must be set/);
+  expect(() => verifyE2eCellar([], "e2e")).toThrow(/belongs to no cellar/);
+  // The membership set does not contain the configured cellar.
+  expect(() => verifyE2eCellar(["real"], "e2e")).toThrow(/not a member of E2E_CELLAR_ID/);
+  expect(() => verifyE2eCellar(["real", "another"], "e2e")).toThrow(
+    /not a member of E2E_CELLAR_ID/,
+  );
+  for (const thrown of [
+    () => verifyE2eCellar(["real"], "e2e"),
+    () => verifyE2eCellar([], "e2e"),
+  ]) {
+    expect(thrown).toThrow(/refusing to mutate/);
+  }
+});
+
+test("UI-mutating specs additionally refuse an ambiguous app target", () => {
+  // The app resolves its active cellar with an unordered limit(1), so a click
+  // could land anywhere the account belongs.
+  expect(verifyAppTargetsE2eCellar(["e2e"], "e2e")).toBe("e2e");
+  expect(verifyAppTargetsE2eCellar(["e2e", "e2e"], "e2e")).toBe("e2e");
+  expect(() => verifyAppTargetsE2eCellar(["e2e", "another"], "e2e")).toThrow(
+    /could write to the wrong one/,
+  );
+  // It still enforces everything the general rule does.
+  expect(() => verifyAppTargetsE2eCellar(["real"], "e2e")).toThrow(
+    /not a member of E2E_CELLAR_ID/,
+  );
+});
+
+test("the specs use the rule that matches how they mutate", () => {
+  const read = (name: string) =>
+    code(readFileSync(join(process.cwd(), "tests/e2e", name), "utf8"));
+  // Mutates by clicking → the app chooses the target → strict rule.
+  expect(read("mobile-workflows.spec.ts")).toMatch(/verifyAppTargetsE2eCellar\(/);
+  expect(read("intelligence.spec.ts")).toMatch(/assertAppTargetsGuardedCellar\(/);
+  // Every write names p_cellar_id itself → general rule, several memberships fine.
+  expect(read("rls-jwt.spec.ts")).toMatch(/verifyE2eCellar\(/);
+});
+
+test("verifyForeignCellar keeps cross-cellar attempts inside the E2E cellar", () => {
+  expect(verifyForeignCellar("e2e", "e2e", ["outsider-own"])).toBe("e2e");
+  expect(() => verifyForeignCellar("someone-else", "e2e", [])).toThrow(
+    /must be the dedicated E2E Test Cellar/,
+  );
+  expect(() => verifyForeignCellar(undefined, "e2e", [])).toThrow(
+    /E2E_FOREIGN_CELLAR_ID must be set/,
+  );
+  expect(() => verifyForeignCellar("e2e", undefined, [])).toThrow(
+    /E2E_CELLAR_ID must be set/,
+  );
+  // If the outsider is a member, the isolation test proves nothing.
+  expect(() => verifyForeignCellar("e2e", "e2e", ["e2e"])).toThrow(/prove nothing/);
+});
+
+test("the guarded specs no longer discover a cellar with limit=1", () => {
+  for (const name of ["mobile-workflows.spec.ts", "rls-jwt.spec.ts"]) {
+    const src = code(readFileSync(join(process.cwd(), "tests/e2e", name), "utf8"));
+    expect(src, `${name} still uses unfiltered discovery`).not.toMatch(
+      /cellar_members\?select=cellar_id&limit=1/,
+    );
+    expect(src, `${name} does not call the guard`).toMatch(/guardedCellarId\(/);
+  }
+});

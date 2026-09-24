@@ -33,6 +33,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { verifyE2eCellar, verifyForeignCellar } from "./fixtures/cellar-guard";
 
 const BASE = process.env.E2E_BASE_URL ?? "http://localhost:5173";
 const FOREIGN_CELLAR = process.env.E2E_FOREIGN_CELLAR_ID ?? "";
@@ -134,6 +135,27 @@ async function signIn(page: Page, acct: Account, label: string) {
   }
 
   await expect(nav).toBeVisible();
+
+  // ── 4. CELLAR GUARD — before this account can attempt ANY write ─────────
+  //
+  // Placed here rather than in each test, so a write that never calls
+  // currentCellarId() is still covered.
+  if (label === "OUTSIDER") {
+    // The outsider only attempts writes against the foreign cellar, which must
+    // BE the E2E Test Cellar — the only permitted target — and which the
+    // outsider must not belong to, or the isolation test proves nothing.
+    if (FOREIGN_CELLAR) {
+      const res = await restRequest(page, "cellar_members?select=cellar_id");
+      const rows = (res.body as { cellar_id: string }[] | null) ?? [];
+      verifyForeignCellar(
+        FOREIGN_CELLAR,
+        process.env.E2E_CELLAR_ID,
+        rows.map((r) => r.cellar_id),
+      );
+    }
+  } else {
+    await guardedCellarId(page);
+  }
 }
 
 /** Enough to identify the account, never the full address. */
@@ -313,10 +335,24 @@ async function createEventFixture(page: Page): Promise<{
 }
 
 /** The cellar the signed-in user belongs to, via the real token path. */
+/**
+ * The ONLY cellar this spec may write to.
+ *
+ * Replaces `limit=1` discovery. Throws unless E2E_CELLAR_ID is among the
+ * account's memberships. Several memberships are fine here: every write in
+ * this spec names the target explicitly, so nothing is chosen by ordering.
+ */
+async function guardedCellarId(page: Page): Promise<string> {
+  const res = await restRequest(page, "cellar_members?select=cellar_id");
+  const rows = (res.body as { cellar_id: string }[] | null) ?? [];
+  return verifyE2eCellar(
+    rows.map((r) => r.cellar_id),
+    process.env.E2E_CELLAR_ID,
+  );
+}
+
 async function currentCellarId(page: Page): Promise<string | null> {
-  const res = await restRequest(page, "cellar_members?select=cellar_id&limit=1");
-  const rows = res.body as { cellar_id: string }[] | null;
-  return rows?.[0]?.cellar_id ?? null;
+  return guardedCellarId(page);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -394,9 +430,12 @@ test.describe("EDITOR — real JWT path", () => {
 
   test("CANNOT invite members — owner only", async ({ page }) => {
     await signIn(page, EDITOR!, "EDITOR");
+    // Scoped to the guarded cellar: this test ATTEMPTS a membership insert,
+    // so the row it targets must belong to the E2E Test Cellar.
+    const guarded = await guardedCellarId(page);
     const cellar = await restRequest(
       page,
-      "cellar_members?select=cellar_id,user_id&limit=1",
+      `cellar_members?select=cellar_id,user_id&cellar_id=eq.${guarded}&limit=1`,
     );
     const row = (cellar.body as { cellar_id: string; user_id: string }[])[0];
 

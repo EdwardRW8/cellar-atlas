@@ -23,6 +23,7 @@
  */
 
 import { test, expect, devices, type Page } from "@playwright/test";
+import { verifyAppTargetsE2eCellar } from "./fixtures/cellar-guard";
 
 const BASE = process.env.E2E_BASE_URL ?? "http://localhost:5173";
 const EMAIL = process.env.E2E_OWNER_EMAIL?.trim();
@@ -131,10 +132,26 @@ async function restRequest(
  * definition would leave the search test asserting against something the UI
  * deliberately does not show. This uses the same RPCs the app uses.
  */
+/**
+ * The ONLY cellar this spec may write to.
+ *
+ * Replaces `limit=1` discovery, which took whatever cellar came back first.
+ * Throws unless E2E_CELLAR_ID is among the account's memberships, and — because
+ * this spec also mutates through the UI — unless that is its only membership.
+ */
+async function guardedCellarId(page: Page): Promise<string> {
+  const res = await restRequest(page, "cellar_members?select=cellar_id");
+  const rows = (res.body as { cellar_id: string }[] | null) ?? [];
+  // The strict variant: this spec also mutates by clicking, so the app picks
+  // the target and must not have a choice to get wrong.
+  return verifyAppTargetsE2eCellar(
+    rows.map((r) => r.cellar_id),
+    process.env.E2E_CELLAR_ID,
+  );
+}
+
 async function seedSearchableWine(page: Page): Promise<{ name: string }> {
-  const cellar = await restRequest(page, "cellar_members?select=cellar_id&limit=1");
-  const cellarId = (cellar.body as { cellar_id: string }[])[0]?.cellar_id;
-  expect(cellarId, "owner must belong to a cellar").toBeTruthy();
+  const cellarId = await guardedCellarId(page);
 
   const name = `E2E Searchable ${Date.now()}`;
 

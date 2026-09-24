@@ -8,10 +8,14 @@
  */
 
 import { test, expect, devices, type Page } from "@playwright/test";
+import { assertAppTargetsGuardedCellar } from "./fixtures/cellar-guard";
 
 const BASE = (process.env.E2E_BASE_URL ?? "http://localhost:5173").replace(/\/+$/, "");
 const EMAIL = process.env.E2E_OWNER_EMAIL?.trim();
 const PASSWORD = process.env.E2E_OWNER_PASSWORD?.trim();
+// Needed by the cellar guard below: this spec SAVES the cellar profile.
+const SUPABASE_URL = process.env.E2E_SUPABASE_URL;
+const SUPABASE_KEY = process.env.E2E_SUPABASE_ANON_KEY;
 
 test.use({ ...devices["iPhone 13"] });
 
@@ -61,6 +65,11 @@ test.describe("intelligence and profile", () => {
     await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible({
       timeout: 25_000,
     });
+
+    // ── CELLAR GUARD ───────────────────────────────────────────────────────
+    // This spec SAVES the cellar profile by clicking, so the APP chooses the
+    // target cellar. It may only ever do so in the dedicated E2E Test Cellar.
+    await assertAppTargetsGuardedCellar(page, SUPABASE_URL, SUPABASE_KEY);
 
     // Real navigation hierarchy: both screens live under More.
     await page.getByRole("link", { name: "More" }).click();
