@@ -28,9 +28,11 @@ const REFUSE = "refusing to mutate";
  * SELECT policy, a query can return one row per MEMBER of a shared cellar
  * rather than one row per cellar, and counting rows would then be wrong.
  *
- * Throws unless the account belongs to exactly one cellar and that cellar is
- * `expected`. Belonging to several is ambiguous — the app writes to whichever
- * it picks — so it is refused rather than guessed.
+ * Throws unless `expected` is among the account's memberships. Belonging to
+ * SEVERAL cellars is ALLOWED: safety comes from every mutation naming this
+ * target explicitly, never from a membership count. The stricter rule for
+ * UI-driven specs, where the app picks the cellar itself, lives in
+ * `verifyAppTargetsE2eCellar` below.
  */
 export function verifyE2eCellar(
   memberCellarIds: readonly string[],

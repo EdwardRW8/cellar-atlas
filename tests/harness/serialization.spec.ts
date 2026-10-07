@@ -663,7 +663,14 @@ test("the history spec uses no service-role credential", () => {
 // is the dedicated E2E one before it writes anything.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const MUTATING_SPECS = ["home.spec.ts", "atlas.spec.ts", "csv-import.spec.ts"];
+const MUTATING_SPECS = [
+  "home.spec.ts",
+  "atlas.spec.ts",
+  "csv-import.spec.ts",
+  // Mutates by clicking "Save profile" (upsert_cellar_profile). The detector
+  // finds it too; listing it keeps the two in agreement.
+  "intelligence.spec.ts",
+];
 
 test("every mutating E2E spec guards its target cellar", () => {
   for (const name of MUTATING_SPECS) {
@@ -964,6 +971,7 @@ test("the detector recognises the specs we know mutate", () => {
     "csv-import.spec.ts",
     "mobile-workflows.spec.ts",
     "rls-jwt.spec.ts",
+    "intelligence.spec.ts",
   ]) {
     expect(
       byName.get(name)?.length ?? 0,
@@ -1090,4 +1098,21 @@ test("the guarded specs no longer discover a cellar with limit=1", () => {
     );
     expect(src, `${name} does not call the guard`).toMatch(/guardedCellarId\(/);
   }
+});
+
+test("mobile-workflows guards the cellar inside beforeEach", () => {
+  // Some of its tests mutate purely by clicking and never call the seed
+  // helper, so a guard that lived only in the helper would not cover them.
+  const src = code(
+    readFileSync(join(process.cwd(), "tests/e2e/mobile-workflows.spec.ts"), "utf8"),
+  );
+  const start = src.indexOf("test.beforeEach(");
+  expect(start, "no beforeEach found").toBeGreaterThan(-1);
+
+  // The end of the beforeEach block: the first test() that follows it.
+  const end = src.indexOf("test(", start + 10);
+  const block = src.slice(start, end === -1 ? undefined : end);
+  expect(block, "beforeEach does not call guardedCellarId").toMatch(
+    /await guardedCellarId\(page\)/,
+  );
 });

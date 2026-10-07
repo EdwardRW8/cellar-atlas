@@ -83,3 +83,33 @@ the harness already forbids real cellar ids from appearing in `tests/e2e`.
 
 Out of scope for 12.0. Worth deciding before the final release-verification gate
 (12.12), which runs the broadest E2E.
+
+---
+
+## 4. The harness cellar-guard check is per FILE, not per test
+
+**Found:** 12.0 audit.
+
+`tests/harness/serialization.spec.ts` decides whether a spec mutates by reading
+the whole file, then checks that the same file mentions a guard somewhere. Two
+consequences follow, and neither is a defect in what it does check:
+
+- **It is file-level.** A spec can be marked guarded because one test calls the
+  guard, while another test in the same file mutates without it. That is
+  exactly the gap found in `mobile-workflows.spec.ts`, where the guard sat in a
+  seed helper that the click-driven test never called. A dedicated assertion
+  now pins the guard inside that file's `beforeEach`, but the general check
+  remains per file.
+- **It only catches what its patterns recognise.** Mutations are detected by
+  write RPCs, non-GET methods, file uploads, and clicks on buttons whose names
+  match a list of verbs. A mutation reached another way — a verb outside the
+  list, a programmatic form submit, a navigation that writes — would not be
+  detected, and the spec would be silently treated as read-only.
+
+**Mitigation in place:** the detector has a negative self-test proving it is
+not vacuous, and the hand-maintained `MUTATING_SPECS` list is asserted to be a
+subset of what the detector finds, so the two cross-check each other.
+
+**Suggested improvement:** assert the guard runs per test — for example by
+requiring it in `beforeEach` for every mutating spec — rather than anywhere in
+the file. Not done in 12.0: it would change several specs at once.

@@ -144,15 +144,15 @@ async function signIn(page: Page, acct: Account, label: string) {
     // The outsider only attempts writes against the foreign cellar, which must
     // BE the E2E Test Cellar — the only permitted target — and which the
     // outsider must not belong to, or the isolation test proves nothing.
-    if (FOREIGN_CELLAR) {
-      const res = await restRequest(page, "cellar_members?select=cellar_id");
-      const rows = (res.body as { cellar_id: string }[] | null) ?? [];
-      verifyForeignCellar(
-        FOREIGN_CELLAR,
-        process.env.E2E_CELLAR_ID,
-        rows.map((r) => r.cellar_id),
-      );
-    }
+    // Always. An unset E2E_FOREIGN_CELLAR_ID must fail loudly rather than skip
+    // the guard and let the prohibited writes run unchecked.
+    const res = await restRequest(page, "cellar_members?select=cellar_id");
+    const rows = (res.body as { cellar_id: string }[] | null) ?? [];
+    verifyForeignCellar(
+      FOREIGN_CELLAR,
+      process.env.E2E_CELLAR_ID,
+      rows.map((r) => r.cellar_id),
+    );
   } else {
     await guardedCellarId(page);
   }
@@ -505,10 +505,18 @@ test.describe("VIEWER — real JWT path", () => {
     await signIn(page, VIEWER!, "VIEWER");
     // RLS denies UPDATE by making rows invisible. No error is raised —
     // watching only for errors would give a false pass.
-    const res = await restRequest(page, "bottles?notes=eq.e2e-viewer-hack", {
-      method: "PATCH",
-      body: { notes: "e2e-viewer-hack" },
-    });
+    // Scoped to the guarded cellar. This is a prohibited write ATTEMPT, so it
+    // must be unable to reach rows outside the E2E Test Cellar even if RLS
+    // regressed. bottles.cellar_id exists (migration 007).
+    const guarded = await guardedCellarId(page);
+    const res = await restRequest(
+      page,
+      `bottles?notes=eq.e2e-viewer-hack&cellar_id=eq.${guarded}`,
+      {
+        method: "PATCH",
+        body: { notes: "e2e-viewer-hack" },
+      },
+    );
     if (res.status === 200) {
       expect(Array.isArray(res.body) ? res.body.length : 0).toBe(0);
     } else {

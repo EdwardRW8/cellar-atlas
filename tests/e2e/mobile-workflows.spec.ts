@@ -129,10 +129,6 @@ async function restRequest(
  * Seed one searchable wine WITH an active bottle.
  *
  * The collection hides wines with no active bottles, so creating only a wine
- * definition would leave the search test asserting against something the UI
- * deliberately does not show. This uses the same RPCs the app uses.
- */
-/**
  * The ONLY cellar this spec may write to.
  *
  * Replaces `limit=1` discovery, which took whatever cellar came back first.
@@ -150,6 +146,13 @@ async function guardedCellarId(page: Page): Promise<string> {
   );
 }
 
+/**
+ * Seed one searchable wine WITH an active bottle.
+ *
+ * The collection hides wines with no active bottles, so creating only a wine
+ * definition would leave the search test asserting against something the UI
+ * deliberately does not show. This uses the same RPCs the app uses.
+ */
 async function seedSearchableWine(page: Page): Promise<{ name: string }> {
   const cellarId = await guardedCellarId(page);
 
@@ -219,6 +222,11 @@ test.describe("mobile workflows", () => {
       page.getByRole("navigation", { name: "Primary" }),
       "sign-in did not complete — check E2E_OWNER_* for stray whitespace",
     ).toBeVisible({ timeout: 25_000 });
+
+    // CELLAR GUARD. Some tests mutate purely by clicking ("add a wine end to
+    // end") and never call seedSearchableWine, so the guard runs here — after
+    // sign-in, before any test body can touch the app.
+    await guardedCellarId(page);
   });
 
   test("the deployment badge does not intercept the Add Wine button", async ({ page }) => {
