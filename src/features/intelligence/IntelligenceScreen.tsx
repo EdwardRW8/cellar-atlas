@@ -1,3 +1,4 @@
+import { NoCellarNotice } from "@/components/NoCellarNotice";
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCellar } from "@/hooks/useCellar";
@@ -46,6 +47,10 @@ export default function Intelligence() {
         <Skeleton rows={3} />
       </div>
     );
+  }
+
+  if (state === "no-cellar") {
+    return <NoCellarNotice what="Insights about your collection appear here" />;
   }
 
   if (state === "error") {

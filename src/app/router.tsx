@@ -1,10 +1,17 @@
-import { lazy, Suspense } from "react";
-import { createBrowserRouter, Outlet, RouterProvider, useNavigate } from "react-router-dom";
+import { lazy, Suspense, type ReactNode } from "react";
+import {
+  createBrowserRouter,
+  Outlet,
+  RouterProvider,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 import { AppShell } from "./layout/AppShell";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { AuthGate } from "@/features/auth/AuthGate";
 import { Spinner } from "@/components/Spinner";
-import { CellarProvider } from "@/hooks/useCellar";
+import { CellarProvider, useCellar } from "@/hooks/useCellar";
+import { NoCellarNotice } from "@/components/NoCellarNotice";
 import { SyncStatusBar } from "@/features/sync/SyncStatusBar";
 import { ADD_BUTTON_OFFSET_REM, ADD_BUTTON_SIZE_PX } from "@/styles/tokens";
 
@@ -35,8 +42,15 @@ function Route({ area, children }: { area: string; children: React.ReactNode }) 
 }
 
 /** Add Wine is always one tap away — the most frequent action. */
-function AddWineButton() {
+/** Exported so the no-cellar behaviour can be tested directly. */
+export function AddWineButton() {
   const navigate = useNavigate();
+  const { state } = useCellar();
+
+  // Nothing to add a wine to yet, and /add is gated anyway — so the button is
+  // hidden rather than left as a route to a blocked screen.
+  if (state === "no-cellar") return null;
+
   return (
     <button
       onClick={() => navigate("/add")}
@@ -62,13 +76,40 @@ function AddWineButton() {
   );
 }
 
+/**
+ * Blocks every route except Home while the user has no cellar.
+ *
+ * Most screens only branch on `state === "loading"`, so in `no-cellar` they
+ * rendered as though everything were ready with no cellar behind them —
+ * Storage showed a create form whose button could do nothing. Gating once here
+ * covers every route, including those added later. The per-screen branches
+ * stay as a second layer.
+ *
+ * Home is exempt: it owns the onboarding that creates the cellar.
+ */
+export function NoCellarGate({ children }: { children: ReactNode }) {
+  const { state } = useCellar();
+  const { pathname } = useLocation();
+
+  if (state === "no-cellar" && pathname !== "/") {
+    return (
+      <div style={{ padding: "1.25rem" }}>
+        <NoCellarNotice what="This becomes available" />
+      </div>
+    );
+  }
+  return <>{children}</>;
+}
+
 function Root() {
   return (
     <AuthGate>
       <CellarProvider>
         <AppShell>
           <SyncStatusBar />
-          <Outlet />
+          <NoCellarGate>
+            <Outlet />
+          </NoCellarGate>
           <AddWineButton />
         </AppShell>
       </CellarProvider>
@@ -81,9 +122,16 @@ function AddWineRoot() {
   return (
     <AuthGate>
       <CellarProvider>
-        <Route area="Add wine">
-          <AddWine />
-        </Route>
+        {/*
+          Add Wine has its OWN provider and does not render through Root's
+          Outlet, so Root's gate never sees it. Without this, a new user could
+          reach the form with no cellar behind it.
+        */}
+        <NoCellarGate>
+          <Route area="Add wine">
+            <AddWine />
+          </Route>
+        </NoCellarGate>
       </CellarProvider>
     </AuthGate>
   );

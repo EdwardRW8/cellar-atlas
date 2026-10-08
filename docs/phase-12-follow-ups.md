@@ -113,3 +113,50 @@ subset of what the detector finds, so the two cross-check each other.
 **Suggested improvement:** assert the guard runs per test — for example by
 requiring it in `beforeEach` for every mutating spec — rather than anywhere in
 the file. Not done in 12.0: it would change several specs at once.
+
+---
+
+## 5. Two tabs could still create two cellars
+
+**Found:** fresh-user hotfix.
+
+`useCellar.createCellar` holds a re-entrancy guard in a ref, so a double-click
+in one tab creates exactly one cellar. That guard is **per tab**. Two tabs (or
+two devices) clicking "Create my cellar" at the same moment would both see no
+membership and both insert, leaving the user with two cellars and an arbitrary
+one opening afterwards — see follow-up 2.
+
+The client cannot close this: it needs the check and the insert to happen under
+one lock, server-side. A `create_first_cellar()` RPC — SECURITY INVOKER, taking
+an advisory lock or relying on a unique constraint on `cellar_members
+(user_id)` where the user is an owner — would do it, and would need a
+migration.
+
+**Not fixed in the hotfix:** the window is small, it needs a migration, and
+migrations were explicitly out of scope. Worth closing before onboarding is
+used by more than a handful of people.
+
+---
+
+## 6. `src/data/sync/` is built, tested, and never runs
+
+**Found:** 12.1 audit.
+
+`src/data/sync/` contains an IndexedDB mutation queue (`queue.ts`), a sync
+engine (`engine.ts`) and a cache (`cache.ts`). All are implemented and covered
+by unit tests. **None of them is wired into the application** — the only
+imports from outside that directory are type-only.
+
+Consequences:
+
+- there is no outbox: a mutation that fails is not retried and not stored, and
+  nothing is replayed on reconnect
+- `pending` in `useCellar` is ordinary React state, lost on reload
+- the tests covering these modules pass while testing code no user ever reaches
+
+Gate 12.7 wires `cache.ts` for read-only offline viewing. The queue and engine
+remain unused after that, since durable offline writes are out of scope for
+Phase 12. **Decide deliberately:** wire them in a later phase, or delete them.
+Leaving tested-but-dead code in place implies a capability the app does not
+have — which is what made the false "your change is queued" messaging
+plausible in the first place.

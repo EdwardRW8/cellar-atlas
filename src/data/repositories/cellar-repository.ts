@@ -75,8 +75,15 @@ export class CellarRepository {
     this.sb = client ?? getSupabase();
   }
 
-  /** The cellar the signed-in user belongs to. Creates one on first use. */
-  static async resolveCellar(client?: SupabaseClient): Promise<string> {
+  /**
+   * The cellar the signed-in user belongs to, or null when they have none.
+   *
+   * This NO LONGER creates a cellar. Opening the app is not consent to create
+   * one, and creating silently on every load made a genuine failure here
+   * indistinguishable from a first run. Creation is now an explicit,
+   * user-initiated action — see `createFirstCellar`.
+   */
+  static async resolveCellar(client?: SupabaseClient): Promise<string | null> {
     const sb = client ?? getSupabase();
 
     const { data: memberships, error } = await sb
@@ -88,18 +95,40 @@ export class CellarRepository {
     if (memberships && memberships.length > 0) {
       return memberships[0]!.cellar_id as string;
     }
+    return null;
+  }
+
+  /**
+   * Create the signed-in user's first cellar and return its id.
+   *
+   * ── WHY THE ID IS GENERATED HERE ──────────────────────────────────────
+   * The previous version ended `.select("id").single()`. That adds a RETURNING
+   * clause, so Postgres checks the new row against the SELECT policy
+   * `is_cellar_member(id)` — and that policy is evaluated BEFORE the AFTER
+   * INSERT trigger `trg_cellar_owner` creates the membership it looks for. The
+   * INSERT itself was always allowed; reading the row back was not, so every
+   * brand-new user was refused with "new row violates row-level security
+   * policy for table cellars".
+   *
+   * Generating the id here removes the need to read anything back: the INSERT
+   * alone satisfies the "create cellars" policy (`created_by = auth.uid()`),
+   * the trigger then grants ownership, and the cellar is readable afterwards.
+   *
+   * No policy, migration or trigger is changed by this.
+   */
+  static async createFirstCellar(client?: SupabaseClient): Promise<string> {
+    const sb = client ?? getSupabase();
 
     const { data: user } = await sb.auth.getUser();
     if (!user.user) throw new Error("Not signed in");
 
-    const { data: created, error: createError } = await sb
+    const id = crypto.randomUUID();
+    const { error } = await sb
       .from("cellars")
-      .insert({ name: "My Cellar", created_by: user.user.id })
-      .select("id")
-      .single();
-    if (createError) throw new Error(createError.message);
+      .insert({ id, name: "My Cellar", created_by: user.user.id });
+    if (error) throw new Error(error.message);
 
-    return created.id as string;
+    return id;
   }
 
   async loadGeographyIndex(): Promise<Map<string, GeoRow>> {

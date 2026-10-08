@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { useAuth } from "@/app/providers/AuthProvider";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCellar } from "@/hooks/useCellar";
 import { cellarValuation } from "@/domain/valuation";
@@ -27,7 +28,8 @@ import { EmptyState } from "@/components/EmptyState";
  * loaded and aggregates it with pure memoised functions.
  */
 export default function Home() {
-  const { state, error, wines, bottles, locations, valuations, refresh } = useCellar();
+  const { state, error, wines, bottles, locations, valuations, refresh, errorKind } =
+    useCellar();
   const navigate = useNavigate();
 
   // Same currency-aware structure as Wine Detail and Collection.
@@ -45,6 +47,10 @@ export default function Home() {
         <Skeleton rows={4} />
       </div>
     );
+  }
+
+  if (state === "no-cellar") {
+    return <FirstCellarOnboarding />;
   }
 
   if (state === "error") {
@@ -69,7 +75,12 @@ export default function Home() {
               marginBottom: "0.5rem",
             }}
           >
-            Could not load your cellar
+            {/* Three different problems need three different words. */}
+            {errorKind === "permission"
+              ? "You do not have permission"
+              : errorKind === "network"
+                ? "Could not reach Cellar Atlas"
+                : "Could not load your cellar"}
           </h2>
           <p
             style={{
@@ -273,3 +284,76 @@ const attentionRow: React.CSSProperties = {
   color: "var(--text-secondary)",
   lineHeight: 1.5,
 };
+
+/**
+ * First run: the user is signed in but has no cellar yet.
+ *
+ * One action, and it is disabled while the request is in flight so a
+ * double-click cannot create two cellars. A failure is shown here rather than
+ * leaving the button looking inert.
+ */
+function FirstCellarOnboarding() {
+  const { createCellar, creatingCellar, error } = useCellar();
+  const { signOut } = useAuth();
+  const [failed, setFailed] = useState<string | null>(null);
+
+  return (
+    <div style={{ padding: "1.5rem 1.25rem" }}>
+      <h1
+        style={{
+          fontFamily: "var(--font-display)",
+          fontSize: "1.875rem",
+          fontStyle: "italic",
+          color: "var(--text-primary)",
+          marginBottom: "0.75rem",
+        }}
+      >
+        Welcome to Cellar Atlas
+      </h1>
+      <p
+        style={{
+          color: "var(--text-secondary)",
+          fontSize: "0.9375rem",
+          lineHeight: 1.7,
+          marginBottom: "1.5rem",
+        }}
+      >
+        You do not have a cellar yet. Create one to start adding your wines.
+      </p>
+
+      <Button
+        fullWidth
+        disabled={creatingCellar}
+        onClick={async () => {
+          setFailed(null);
+          const r = await createCellar();
+          if (!r.ok && r.error) setFailed(r.error);
+        }}
+      >
+        {creatingCellar ? "Creating…" : "Create my cellar"}
+      </Button>
+
+      {/*
+        Sign-out lives only on More, which the no-cellar gate blocks — so
+        without this a user with no cellar would have no way out of the app.
+      */}
+      <Button variant="ghost" fullWidth onClick={() => void signOut()}>
+        Sign out
+      </Button>
+
+      {(failed ?? error) && (
+        <p
+          role="alert"
+          style={{
+            marginTop: "1rem",
+            fontSize: "0.8125rem",
+            color: "var(--status-past)",
+            lineHeight: 1.6,
+          }}
+        >
+          {failed ?? error}
+        </p>
+      )}
+    </div>
+  );
+}

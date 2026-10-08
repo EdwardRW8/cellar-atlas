@@ -37,7 +37,34 @@ import {
   type BottleCostResult,
 } from "@/domain/valuation";
 
-export type LoadState = "loading" | "ready" | "error";
+/**
+ * `no-cellar` is a first-run state, NOT a failure: the user is signed in and
+ * everything works, they simply have no cellar yet. It was previously
+ * indistinguishable from a real error, which is what made a brand-new account
+ * look broken.
+ */
+export type LoadState = "loading" | "ready" | "no-cellar" | "error";
+
+/**
+ * Why loading failed, when it did.
+ *
+ * These need different words and different actions: a permission problem is
+ * not a network problem, and neither is "you have no cellar yet".
+ */
+export type LoadErrorKind = "permission" | "network" | "unknown";
+
+/** Classify a failure WITHOUT guessing: anything unrecognised stays unknown. */
+export function classifyLoadError(message: string): LoadErrorKind {
+  const m = message.toLowerCase();
+  if (
+    /row-level security|row level security|permission denied|not authorized|jwt|forbidden/.test(
+      m,
+    )
+  )
+    return "permission";
+  if (/failed to fetch|network|offline|timeout|econn|unreachable/.test(m)) return "network";
+  return "unknown";
+}
 
 interface CellarValue {
   state: LoadState;
@@ -64,6 +91,21 @@ interface CellarValue {
   valuations: Map<string, BottleValuation>;
 
   online: boolean;
+
+  /** Why loading failed. Only meaningful when `state === "error"`. */
+  errorKind: LoadErrorKind;
+
+  /** True while the first cellar is being created; blocks a second attempt. */
+  creatingCellar: boolean;
+
+  /**
+   * Create this user's first cellar, then load it.
+   *
+   * Re-entrant calls are ignored, so a double-click cannot create two cellars.
+   * That guard is per tab — see follow-up 5 for the two-tab case, which needs
+   * a server-side fix.
+   */
+  createCellar: () => Promise<{ ok: boolean; error?: string }>;
   refresh: () => Promise<void>;
   mutations: MutationRepository | null;
   repository: CellarRepository | null;
@@ -100,6 +142,9 @@ export function CellarProvider({ children }: { children: ReactNode }) {
 
   const [state, setState] = useState<LoadState>("loading");
   const [error, setError] = useState<string | null>(null);
+  const [errorKind, setErrorKind] = useState<LoadErrorKind>("unknown");
+  const [creatingCellar, setCreatingCellar] = useState(false);
+  const creatingRef = useRef(false);
   const [cellarId, setCellarId] = useState<string | null>(null);
 
   const [wines, setWines] = useState<WineSummary[]>([]);
@@ -118,57 +163,96 @@ export function CellarProvider({ children }: { children: ReactNode }) {
   const repoRef = useRef<CellarRepository | null>(null);
   const mutRef = useRef<MutationRepository | null>(null);
 
-  const load = useCallback(async () => {
-    if (!session) return;
-    setState("loading");
+  const load = useCallback(
+    async (explicitCellarId?: string) => {
+      if (!session) return;
+      setState("loading");
+      setError(null);
+      try {
+        const id = explicitCellarId ?? cellarId ?? (await CellarRepository.resolveCellar());
+
+        // No cellar yet: a first run, not a failure. Home offers to create one.
+        if (!id) {
+          setCellarId(null);
+          setState("no-cellar");
+          return;
+        }
+        setCellarId(id);
+
+        const repo = new CellarRepository(id);
+        repoRef.current = repo;
+        mutRef.current = new MutationRepository({ cellarId: id, userId: session.user.id });
+
+        const data = await repo.loadCollection();
+        setWines(data.wines);
+        setBottles(data.bottles);
+        setLocations(data.locations);
+
+        // Profile failure must not block the cellar: intelligence degrades,
+        // the collection still loads.
+        const loadedProfile = await repo.loadCellarProfile().catch(() => null);
+        setProfile(loadedProfile);
+
+        // Valuation currency and acquisition cost. Both are additive: a failure
+        // leaves the collection fully usable and simply reports value as
+        // unknown rather than as zero.
+        const [valuationResult, acquisitionCosts] = await Promise.all([
+          repo
+            .loadValuationCurrencies(
+              data.bottles.map((b) => ({
+                id: b.id,
+                wineDefinitionId: b.wineDefinitionId,
+                currentValue: b.currentValue,
+                currentValueAt: b.currentValueAt ?? null,
+              })),
+            )
+            .catch(() => ({
+              valuations: new Map(),
+              strategy: "none" as const,
+            })),
+          repo.loadAcquisitionCosts().catch(() => new Map()),
+        ]);
+
+        setValuations(valuationResult.valuations);
+        setCosts(mapBottleCosts(data.bottles, acquisitionCosts));
+
+        setState("ready");
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "Could not load your cellar";
+        setError(message);
+        setErrorKind(classifyLoadError(message));
+        setState("error");
+      }
+    },
+    [session, cellarId],
+  );
+
+  const createCellar = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
+    // Re-entrancy guard, held in a REF rather than state: two clicks in the
+    // same tick would both read a state value of false and both create a
+    // cellar. A ref updates synchronously, so the second call sees it.
+    if (creatingRef.current) return { ok: false };
+    creatingRef.current = true;
+    setCreatingCellar(true);
     setError(null);
     try {
-      const id = cellarId ?? (await CellarRepository.resolveCellar());
+      const id = await CellarRepository.createFirstCellar();
       setCellarId(id);
-
-      const repo = new CellarRepository(id);
-      repoRef.current = repo;
-      mutRef.current = new MutationRepository({ cellarId: id, userId: session.user.id });
-
-      const data = await repo.loadCollection();
-      setWines(data.wines);
-      setBottles(data.bottles);
-      setLocations(data.locations);
-
-      // Profile failure must not block the cellar: intelligence degrades,
-      // the collection still loads.
-      const loadedProfile = await repo.loadCellarProfile().catch(() => null);
-      setProfile(loadedProfile);
-
-      // Valuation currency and acquisition cost. Both are additive: a failure
-      // leaves the collection fully usable and simply reports value as
-      // unknown rather than as zero.
-      const [valuationResult, acquisitionCosts] = await Promise.all([
-        repo
-          .loadValuationCurrencies(
-            data.bottles.map((b) => ({
-              id: b.id,
-              wineDefinitionId: b.wineDefinitionId,
-              currentValue: b.currentValue,
-              currentValueAt: b.currentValueAt ?? null,
-            })),
-          )
-          .catch(() => ({
-            valuations: new Map(),
-            strategy: "none" as const,
-          })),
-        repo.loadAcquisitionCosts().catch(() => new Map()),
-      ]);
-
-      setValuations(valuationResult.valuations);
-      setCosts(mapBottleCosts(data.bottles, acquisitionCosts));
-
-      setState("ready");
+      // Load it now. The load effect watches `session`, not `cellarId`, so
+      // setting the id alone would leave the user on the onboarding screen
+      // with a cellar that exists but is never fetched.
+      await load(id);
+      return { ok: true };
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not load your cellar");
-      setState("error");
+      const message = e instanceof Error ? e.message : "Could not create your cellar";
+      setError(message);
+      setErrorKind(classifyLoadError(message));
+      return { ok: false, error: message };
+    } finally {
+      creatingRef.current = false;
+      setCreatingCellar(false);
     }
-  }, [session, cellarId]);
+  }, [load]);
 
   useEffect(() => {
     void load();
@@ -300,7 +384,13 @@ export function CellarProvider({ children }: { children: ReactNode }) {
       conflicts,
       failed,
       online,
-      refresh: load,
+      errorKind,
+      creatingCellar,
+      createCellar,
+      // Wrapped, not passed directly: `load` now takes an optional cellar id,
+      // and `onClick={refresh}` would hand it a click event. Callers get a
+      // plain reload with no way to choose the cellar.
+      refresh: () => load(),
       runBatch,
       mutations: mutRef.current,
       repository: repoRef.current,
@@ -322,6 +412,12 @@ export function CellarProvider({ children }: { children: ReactNode }) {
       conflicts,
       failed,
       online,
+      // These were missing, so a consumer never saw them change: the
+      // onboarding button stayed enabled mid-request and the error
+      // heading never switched. A memo is only as correct as its deps.
+      errorKind,
+      creatingCellar,
+      createCellar,
       load,
       run,
       runBatch,

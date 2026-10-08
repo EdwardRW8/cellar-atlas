@@ -1,3 +1,4 @@
+import { NoCellarNotice } from "@/components/NoCellarNotice";
 import { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useCellar } from "@/hooks/useCellar";
@@ -64,6 +65,10 @@ export default function CollectionScreen() {
         <Skeleton />
       </div>
     );
+  }
+
+  if (state === "no-cellar") {
+    return <NoCellarNotice what="Your wines will appear here" />;
   }
 
   if (state === "error") {

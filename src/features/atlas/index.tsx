@@ -1,3 +1,4 @@
+import { NoCellarNotice } from "@/components/NoCellarNotice";
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCellar } from "@/hooks/useCellar";
@@ -90,6 +91,10 @@ export default function Atlas() {
         <Skeleton rows={3} />
       </div>
     );
+  }
+
+  if (state === "no-cellar") {
+    return <NoCellarNotice what="The Atlas maps where your wines come from" />;
   }
 
   if (state === "error") {
