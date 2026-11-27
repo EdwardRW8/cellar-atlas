@@ -1,0 +1,55 @@
+# Cloudflare Pages response headers.
+#
+# Vite copies everything in public/ to the root of dist/, so this file is
+# served as /_headers and Pages reads it at deploy time. It replaces the
+# [[headers]] blocks that used to live in netlify.toml.
+#
+# Verified after deployment with:
+#   curl -sI https://cellar-atlas.pages.dev/
+#   curl -sI https://cellar-atlas.pages.dev/assets/<hashed>.js
+#
+# DELIBERATELY ABSENT: any Cache-Control rule on /*. Pages already serves HTML
+# with a revalidating default, and when two rules set the same header the
+# outcome depends on match order — so setting it twice would make the asset
+# rule below ambiguous. One rule, one header, no ambiguity.
+
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+  # REPORT-ONLY, ON PURPOSE.
+  #
+  # This policy is a hypothesis about what the app loads, and an enforced
+  # policy that is wrong breaks sign-in — the one thing that must never break
+  # silently. Report-only logs each violation to the browser console and
+  # blocks nothing, so the policy can be corrected from evidence.
+  #
+  # No report-uri is set: that would mean sending violation reports, which
+  # include URLs, to a third-party collector. The console is enough for one
+  # operator, and adds no infrastructure and no data sharing.
+  #
+  # Enforcing it is a later gate. Promote it by renaming this header to
+  # Content-Security-Policy only after a full pass — sign in, sign out, load
+  # the Atlas, import a CSV, record a tasting — reports nothing.
+  #
+  # Why each source is here:
+  #   script-src 'self'          the built bundles; the built index.html has
+  #                              no inline script, so no 'unsafe-inline'
+  #   style-src  fonts.googleapis.com   src/styles/global.css @imports it
+  #   font-src   fonts.gstatic.com      where that stylesheet's fonts live
+  #   connect-src *.supabase.co         REST and auth. Narrow this to the one
+  #                              project host once confirmed; a custom
+  #                              Supabase domain would need adding
+  #   wss://*.supabase.co        Realtime is configured off, but the client
+  #                              can still attempt a socket on auth refresh
+  #   img-src data:              inline SVG data URIs in the UI
+  #   frame-ancestors 'none'     the CSP form of X-Frame-Options: DENY, which
+  #                              is the version modern browsers honour
+  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
+
+# Vite fingerprints every filename here, so the content at a given URL can
+# never change. A year, immutable, is safe and means a repeat visit
+# revalidates nothing.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

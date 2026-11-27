@@ -252,3 +252,47 @@ permitted here.
 Expect friction on first attempt, particularly around pre-existing Supabase
 roles and extensions on the schema step. **Do not let the first attempt be
 during an outage.**
+
+---
+
+## 11. The CSP is report-only and is a hypothesis, not a verified policy
+
+**Found:** gate 12.4.
+
+`public/_headers` ships `Content-Security-Policy-Report-Only`. Its source list
+was derived by reading the code — the Google Fonts `@import` in
+`src/styles/global.css`, Supabase's REST and auth hosts, inline SVG data URIs —
+and a unit test cross-checks the font and style sources against what the CSS
+actually imports. **It has never been exercised against the running app.**
+
+Two known gaps:
+
+- `connect-src` allows `https://*.supabase.co` rather than the one project
+  host, because the host comes from a build-time environment variable and
+  `_headers` is static. A **custom Supabase domain would not match at all**.
+- `ImportScreen` uses `URL.createObjectURL` for the CSV template download.
+  Blob downloads are not expected to be restricted by this policy, but that is
+  an expectation, not an observation.
+
+**Suggested closure:** after deploying, sign in and out, load the Atlas, import
+a CSV and record a tasting with the browser console open; correct the policy
+from the reports; only then rename the header to `Content-Security-Policy`.
+
+---
+
+## 12. Deployed response headers are configured, not verified
+
+**Found:** gate 12.4.
+
+`tests/unit/hosting-headers.test.ts` asserts the contents of `public/_headers`
+and that Vite copies it to `dist/`. A static file cannot prove what Cloudflare
+actually returns: a syntax error Pages silently ignores, or a dashboard-level
+override, would leave the tests green and the headers absent.
+
+The `curl -sI` check in `docs/deployment.md` is the only thing that closes
+this, and it can only be run after a deploy.
+
+Related, and the reason this is a test rather than a note: Pages serves `/` for
+unmatched paths **only while there is no top-level `404.html`**. Adding one
+would break every deep link while leaving the front page working. The test
+fails if that file ever appears.

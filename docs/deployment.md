@@ -6,7 +6,7 @@
 |---|---|---|
 | 1 | `db/deploy/01-inspect-current-state.sql` | No — read only |
 | 2 | `db/deploy/02-clean-rebuild.sql` | **Yes** — only if step 1 says so |
-| 3 | Migrations `001` → `013` in order | Creates |
+| 3 | Migrations `001` → `018` in order | Creates |
 | 4 | `db/deploy/03-post-deploy-verify.sql` | No — 18 checks |
 | 5 | `db/deploy/04-live-rls-verification.sql` | No — RLS testing |
 | 6 | Development fixture | Creates test data |
@@ -79,11 +79,86 @@ Covered by 8 tests in `tests/unit/rebuild-preflight.test.ts`, including
 multiple pre-existing users, repeated application of 001, and the trigger
 still working for users created afterwards.
 
-## Netlify credits
+## Hosting: Cloudflare Pages
 
-Netlify Free is credit-based with a monthly allowance that does not roll over,
-and production deploys consume credits.
+The app is hosted on Cloudflare Pages, which builds and deploys `main`
+automatically. `netlify.toml` was removed in 12.4; its build settings,
+redirect and headers now live in the Cloudflare dashboard and in
+`public/_headers`.
 
-Develop on a branch and minimise production deploys. Branch and preview
-deploys may or may not consume credits under current terms — **verify against
-your account's usage page before relying on them being free.**
+### Build settings (Cloudflare dashboard)
+
+| Setting | Value |
+|---|---|
+| Build command | `npm run build` |
+| Build output directory | `dist` |
+| Node version | Set `NODE_VERSION` to `20` in the Pages environment variables |
+
+`npm run build` runs `tsc --noEmit` before `vite build`, so a type error fails
+the deploy rather than shipping.
+
+> **Set the Node version explicitly.** Pages' default has changed before, and
+> a silent major-version bump at build time is the kind of thing that breaks a
+> deploy on an unrelated day.
+
+### Environment variables
+
+Set in Pages → Settings → Environment variables, for **Production and
+Preview** separately. Names only — the values belong in the dashboard, never
+in the repository:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`
+- `NODE_VERSION`
+
+Vite inlines `VITE_*` at build time, so **changing one requires a redeploy**;
+it does not take effect on its own. If the app loads but reports that Supabase
+is not configured, these are missing from the environment that built it —
+most often set for Production but not Preview.
+
+The publishable key is safe in the browser *only* because RLS is enabled on
+every table. See [rls-verification.md](./rls-verification.md).
+
+### Deep links work without a `_redirects` file
+
+Cloudflare Pages serves `/` for any path that does not match a static asset,
+treating the project as a single-page application — but, per Cloudflare's
+documentation, **only when the project has no top-level `404.html`**.
+
+> ⚠️ **Never add `public/404.html`.** Doing so switches Pages out of
+> single-page-app mode, and every deep link — `/wine/<id>`, `/storage`,
+> every emailed or bookmarked URL — starts returning the 404 page instead of
+> the app. The site's front page would keep working, so this breaks quietly.
+> `tests/unit/hosting-headers.test.ts` fails if that file appears.
+
+### Security headers
+
+`public/_headers` is copied to the deploy root by Vite and read by Pages. It
+sets `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: strict-origin-when-cross-origin`, a **report-only** CSP, and
+a one-year immutable cache for `/assets/*` (safe because Vite fingerprints
+every asset filename).
+
+The CSP is report-only deliberately: an enforced policy that is wrong breaks
+sign-in. Promote it to `Content-Security-Policy` only after signing in and
+out, loading the Atlas, importing a CSV and recording a tasting all report
+nothing in the browser console.
+
+### Verify after deploying
+
+```sh
+curl -sI https://cellar-atlas.pages.dev/ | grep -iE 'x-frame|x-content|referrer|content-security'
+curl -sI https://cellar-atlas.pages.dev/assets/ | grep -i cache-control
+```
+
+Expect all three security headers plus the report-only CSP on the first, and
+`public, max-age=31536000, immutable` on a hashed asset. Then open a deep link
+directly — paste `/storage` into a fresh tab — and confirm the app loads
+rather than a 404.
+
+### Rollback
+
+Pages keeps every previous deployment: Deployments → the last good one →
+*Rollback*. To undo only the headers, trim or delete `public/_headers` and
+redeploy. The report-only CSP cannot break anything, so it is not a rollback
+candidate.
