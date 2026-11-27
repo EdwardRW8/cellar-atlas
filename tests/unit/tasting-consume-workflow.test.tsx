@@ -18,7 +18,14 @@ import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/re
 import type { DomainBottle, BottleStatus } from "@/domain/types";
 
 let cellarState: Record<string, unknown>;
-vi.mock("@/hooks/useCellar", () => ({ useCellar: () => cellarState }));
+vi.mock("@/hooks/useCellar", async () => {
+  // Spread the real module: the screens import message helpers from it as
+  // well as the hook, and a wholesale replacement left those undefined —
+  // which silently degraded before and now fails loudly, correctly.
+  const actual =
+    await vi.importActual<typeof import("@/hooks/useCellar")>("@/hooks/useCellar");
+  return { ...actual, useCellar: () => cellarState };
+});
 
 const { BottleActionSheet } = await import("@/features/cellar/BottleActions");
 
@@ -77,6 +84,13 @@ function renderSheet(
 
   cellarState = {
     state: "ready",
+    // Writing is gated on a CONFIRMED role (12.1). Without these the action
+    // buttons are correctly disabled and every assertion below would be
+    // testing a button that cannot be pressed.
+    online: true,
+    canMutate: true,
+    role: "owner",
+    permissionState: "known",
     locations: [{ id: "loc1", name: "Cellar", isExternal: false, isPositioned: false }],
     bottles: [b],
     wines: [],

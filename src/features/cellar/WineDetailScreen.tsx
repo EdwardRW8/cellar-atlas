@@ -18,7 +18,7 @@ export default function WineDetailScreen() {
   const { wineId } = useParams();
   const navigate = useNavigate();
   const data = useWine(wineId);
-  const { locations, run, refresh } = useCellar();
+  const { locations, run, refresh, canMutate } = useCellar();
   const [actionBottle, setActionBottle] = useState<DomainBottle | null>(null);
   const [editing, setEditing] = useState(false);
   const [valuing, setValuing] = useState(false);
@@ -89,7 +89,11 @@ export default function WineDetailScreen() {
         </div>
 
         <div style={{ display: "flex", gap: 8, marginTop: "1rem" }}>
-          <Button variant="secondary" onClick={() => setEditing(true)}>
+          <Button
+            variant="secondary"
+            disabled={!canMutate}
+            onClick={() => setEditing(true)}
+          >
             Edit wine
           </Button>
         </div>
@@ -282,6 +286,7 @@ export default function WineDetailScreen() {
 
       <Sheet open={valuing} onClose={() => setValuing(false)} title="Record valuation">
         <RecordValuationSheet
+          canMutate={canMutate}
           wine={wine}
           activeBottles={bottles.filter(
             (b) => b.isActive && b.wineDefinitionId === wine.id,
@@ -314,6 +319,7 @@ export default function WineDetailScreen() {
 
       <Sheet open={editing} onClose={() => setEditing(false)} title="Edit wine">
         <EditWineForm
+          canMutate={canMutate}
           wine={wine}
           onCancel={() => setEditing(false)}
           onSave={async (patch) => {

@@ -106,6 +106,7 @@ function renderSheet(
     .mockResolvedValue({ delivered: bottles.map((b) => b.id), failed: [] });
   const r = render(
     <DeliverAllSheet
+      canMutate
       bottles={bottles}
       wines={new Map([["w1", WINE]])}
       destinations={destinations}
@@ -271,6 +272,7 @@ describe("partial success is reported honestly", () => {
     const onDeliver = vi.fn().mockResolvedValue(result);
     render(
       <DeliverAllSheet
+        canMutate
         bottles={[bottle("b1"), bottle("b2"), bottle("b3")]}
         wines={new Map([["w1", WINE]])}
         destinations={[UNPOSITIONED]}

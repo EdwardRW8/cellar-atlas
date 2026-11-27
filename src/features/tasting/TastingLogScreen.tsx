@@ -28,7 +28,7 @@ import { TOUCH_TARGET_MIN_PX } from "@/styles/tokens";
  * like any other, marked so the reader knows the wine was never in the cellar.
  */
 export default function TastingLogScreen() {
-  const { repository, run, state } = useCellar();
+  const { repository, run, state, canMutate } = useCellar();
   const navigate = useNavigate();
 
   const [tastings, setTastings] = useState<TastingRecord[]>([]);
@@ -229,6 +229,7 @@ export default function TastingLogScreen() {
       <Sheet open={editing !== null} onClose={() => setEditing(null)} title="Edit tasting">
         {editing && (
           <EditTastingForm
+            canMutate={canMutate}
             tasting={editing}
             onCancel={() => setEditing(null)}
             onSave={async (patch) => {
@@ -267,11 +268,15 @@ export default function TastingLogScreen() {
 }
 
 function EditTastingForm({
+  canMutate,
   tasting,
   onCancel,
   onSave,
   onDelete,
 }: {
+  /** Supplied by the parent screen. REQUIRED: a default would let a new
+   * call site skip the gate silently. */
+  canMutate: boolean;
   tasting: TastingRecord;
   onCancel: () => void;
   onSave: (patch: Record<string, unknown>) => Promise<boolean>;
@@ -311,7 +316,7 @@ function EditTastingForm({
           <Button
             variant="danger"
             fullWidth
-            disabled={busy || !reason.trim()}
+            disabled={busy || !reason.trim() || !canMutate}
             onClick={async () => {
               setBusy(true);
               await onDelete(reason.trim());
@@ -382,7 +387,7 @@ function EditTastingForm({
 
       <Button
         fullWidth
-        disabled={busy}
+        disabled={busy || !canMutate}
         onClick={async () => {
           setBusy(true);
           await onSave({

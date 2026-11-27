@@ -24,6 +24,7 @@ vi.mock("@/app/providers/AuthProvider", () => ({ useAuth: () => SESSION }));
 const resolveCellar = vi.fn();
 const createFirstCellar = vi.fn();
 const loadCollection = vi.fn();
+const loadMyRole = vi.fn();
 
 vi.mock("@/data/repositories/cellar-repository", () => ({
   CellarRepository: class {
@@ -31,6 +32,7 @@ vi.mock("@/data/repositories/cellar-repository", () => ({
     static createFirstCellar = (...a: unknown[]) => createFirstCellar(...a);
     loadCollection = (...a: unknown[]) => loadCollection(...a);
     loadCellarProfile = async () => null;
+    loadMyRole = (...a: unknown[]) => loadMyRole(...a);
     loadValuationCurrencies = async () => ({
       valuations: new Map(),
       strategy: "none" as const,
@@ -47,6 +49,11 @@ const { CellarProvider, useCellar } = await import("@/hooks/useCellar");
 const { default: HomeScreen } = await import("@/features/home/index");
 const { NoCellarGate, AddWineButton } = await import("@/app/router");
 const { default: StorageScreen } = await import("@/features/storage/StorageScreen");
+
+function CanMutateProbe() {
+  const { canMutate, role } = useCellar();
+  return <div data-testid="can-mutate">{`${canMutate}|${role}`}</div>;
+}
 
 function Probe() {
   const { state, errorKind, creatingCellar } = useCellar();
@@ -75,6 +82,7 @@ beforeEach(() => {
   // rejection set by one test leaked into the next.
   vi.resetAllMocks();
   loadCollection.mockResolvedValue({ wines: [], bottles: [], locations: [] });
+  loadMyRole.mockResolvedValue("owner");
   resolveCellar.mockResolvedValue(null);
   createFirstCellar.mockResolvedValue("cellar-1");
 });
@@ -371,5 +379,200 @@ describe("a user with no cellar can still sign out", () => {
     );
     await waitFor(() => expect(probe()).toMatch(/^no-cellar\|/));
     expect(screen.queryByText("THE MORE SCREEN")).toBeNull();
+  });
+});
+
+describe("canMutate REACHES CONSUMERS when it changes", () => {
+  // The first-cellar hotfix uncovered a memo whose dependency array omitted
+  // its new values, so consumers never saw them change. canMutate is only
+  // useful if it propagates; this is the regression test for that whole class
+  // of bug.
+  const mountProbe = () =>
+    render(
+      <MemoryRouter>
+        <CellarProvider>
+          <CanMutateProbe />
+          <Probe />
+        </CellarProvider>
+      </MemoryRouter>,
+    );
+  const canMutate = () => screen.getByTestId("can-mutate").textContent;
+
+  it("an owner online can mutate", async () => {
+    resolveCellar.mockResolvedValue("existing-cellar");
+    mountProbe();
+    await waitFor(() => expect(canMutate()).toBe("true|owner"));
+  });
+
+  it("GOING OFFLINE propagates — the consumer sees false", async () => {
+    resolveCellar.mockResolvedValue("existing-cellar");
+    mountProbe();
+    await waitFor(() => expect(canMutate()).toBe("true|owner"));
+
+    await act(async () => {
+      Object.defineProperty(navigator, "onLine", { value: false, configurable: true });
+      window.dispatchEvent(new Event("offline"));
+    });
+    await waitFor(() => expect(canMutate()).toBe("false|owner"));
+
+    // ...and coming back online propagates too.
+    await act(async () => {
+      Object.defineProperty(navigator, "onLine", { value: true, configurable: true });
+      window.dispatchEvent(new Event("online"));
+    });
+    await waitFor(() => expect(canMutate()).toBe("true|owner"));
+  });
+
+  it("A VIEWER cannot mutate, even online", async () => {
+    resolveCellar.mockResolvedValue("existing-cellar");
+    loadMyRole.mockResolvedValue("viewer");
+    mountProbe();
+    await waitFor(() => expect(canMutate()).toBe("false|viewer"));
+  });
+
+  it("the Create my cellar button is disabled when canMutate is false", async () => {
+    // A viewer with no cellar, or an offline user, must not be offered a
+    // control whose click cannot succeed.
+    resolveCellar.mockResolvedValue(null);
+    Object.defineProperty(navigator, "onLine", { value: false, configurable: true });
+    render(
+      <MemoryRouter>
+        <CellarProvider>
+          <HomeScreen />
+          <Probe />
+        </CellarProvider>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(probe()).toMatch(/^no-cellar\|/));
+    const button = screen.getByRole("button", { name: /offline|create my cellar/i });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    Object.defineProperty(navigator, "onLine", { value: true, configurable: true });
+  });
+
+  it("an editor can", async () => {
+    resolveCellar.mockResolvedValue("existing-cellar");
+    loadMyRole.mockResolvedValue("editor");
+    mountProbe();
+    await waitFor(() => expect(canMutate()).toBe("true|editor"));
+  });
+
+  it("a FAILED role lookup does NOT enable writes", async () => {
+    // SUPERSEDED: this previously asserted the opposite. A permission check
+    // that did not complete is not permission.
+    resolveCellar.mockResolvedValue("existing-cellar");
+    loadMyRole.mockRejectedValue(new Error("could not read role"));
+    mountProbe();
+    await waitFor(() => expect(canMutate()).toBe("false|null"));
+  });
+
+  it("…and the failure is RECOVERABLE, not terminal", async () => {
+    resolveCellar.mockResolvedValue("existing-cellar");
+    loadMyRole.mockRejectedValue(new Error("network"));
+
+    let recheck!: () => Promise<void>;
+    function Recheck() {
+      recheck = useCellar().recheckPermission;
+      return null;
+    }
+    render(
+      <MemoryRouter>
+        <CellarProvider>
+          <CanMutateProbe />
+          <Recheck />
+          <Probe />
+        </CellarProvider>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(canMutate()).toBe("false|null"));
+
+    // The check succeeds on retry; the user is not stranded read-only.
+    loadMyRole.mockResolvedValue("owner");
+    await act(async () => {
+      await recheck();
+    });
+    await waitFor(() => expect(canMutate()).toBe("true|owner"));
+  });
+
+  it("a role that is not owner or editor cannot write", async () => {
+    resolveCellar.mockResolvedValue("existing-cellar");
+    loadMyRole.mockResolvedValue(null);
+    mountProbe();
+    await waitFor(() => expect(canMutate()).toBe("false|null"));
+  });
+});
+
+describe("REGRESSION: a fresh online account can still create its first cellar", () => {
+  // The permission gate must not break onboarding. A brand-new account has no
+  // membership, so no role, so `canMutate` is false by design — if the button
+  // were gated on it, the account could never create the cellar that would
+  // give it a role. This is the end-to-end proof that it is not.
+  beforeEach(() => {
+    resolveCellar.mockResolvedValue(null);
+    loadMyRole.mockResolvedValue(null); // no membership yet
+  });
+
+  it("canCreateCellar is true while canMutate is false", async () => {
+    function Gates() {
+      const { canCreateCellar, canMutate } = useCellar();
+      return <div data-testid="gates">{`${canCreateCellar}|${canMutate}`}</div>;
+    }
+    render(
+      <MemoryRouter>
+        <CellarProvider>
+          <Gates />
+          <Probe />
+        </CellarProvider>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(probe()).toMatch(/^no-cellar\|/));
+    expect(screen.getByTestId("gates").textContent).toBe("true|false");
+  });
+
+  it("the button is ENABLED and creates the cellar", async () => {
+    createFirstCellar.mockResolvedValue("new-cellar");
+    render(
+      <MemoryRouter>
+        <CellarProvider>
+          <HomeScreen />
+          <Probe />
+        </CellarProvider>
+      </MemoryRouter>,
+    );
+    const button = await screen.findByRole("button", { name: /create my cellar/i });
+    expect(
+      (button as HTMLButtonElement).disabled,
+      "a fresh account must be able to click it",
+    ).toBe(false);
+
+    // Once the cellar exists the user is its owner, so writing is permitted.
+    loadMyRole.mockResolvedValue("owner");
+    fireEvent.click(button);
+    await waitFor(() => expect(probe()).toMatch(/^ready\|/));
+    expect(createFirstCellar).toHaveBeenCalledTimes(1);
+  });
+
+  it("offline, the button is disabled — nothing can be created", async () => {
+    Object.defineProperty(navigator, "onLine", { value: false, configurable: true });
+    render(
+      <MemoryRouter>
+        <CellarProvider>
+          <HomeScreen />
+          <Probe />
+        </CellarProvider>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(probe()).toMatch(/^no-cellar\|/));
+    const button = screen.getByRole("button", { name: /offline|create my cellar/i });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    Object.defineProperty(navigator, "onLine", { value: true, configurable: true });
+  });
+
+  it("the INSERT-without-RETURNING hotfix is intact", () => {
+    // The whole reason a fresh account can create a cellar at all.
+    const repo = readFileSync("src/data/repositories/cellar-repository.ts", "utf8");
+    const fn = repo.slice(repo.indexOf("static async createFirstCellar"));
+    const body = fn.slice(0, fn.indexOf("\n  }"));
+    expect(body).toMatch(/crypto\.randomUUID\(\)/);
+    expect(body, "a .select() here reintroduces the RLS failure").not.toMatch(/\.select\(/);
   });
 });

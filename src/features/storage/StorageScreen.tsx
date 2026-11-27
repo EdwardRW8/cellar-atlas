@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useCellar } from "@/hooks/useCellar";
+import { useCellar, mutationFailureMessage } from "@/hooks/useCellar";
 import { Sheet } from "@/components/Sheet";
 import { Button } from "@/components/Button";
 import { Field } from "@/components/Field";
@@ -28,9 +28,12 @@ function occupancyFor(l: DomainStorageLocation) {
 }
 
 export default function StorageScreen() {
-  const { state, locations, run } = useCellar();
+  const { state, locations, run, canMutate } = useCellar();
   const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
+  // A failed creation must be visible: it previously returned silently,
+  // so the button appeared to do nothing.
+  const [createError, setCreateError] = useState<string | null>(null);
 
   if (state === "loading") {
     return (
@@ -119,10 +122,27 @@ export default function StorageScreen() {
 
       <Sheet
         open={creating}
-        onClose={() => setCreating(false)}
+        onClose={() => {
+          setCreateError(null);
+          setCreating(false);
+        }}
         title="New storage location"
       >
+        {createError && (
+          <p
+            role="alert"
+            style={{
+              fontSize: "0.8125rem",
+              color: "var(--status-past)",
+              marginBottom: 12,
+              lineHeight: 1.6,
+            }}
+          >
+            {createError}
+          </p>
+        )}
         <CreateLocationForm
+          canMutate={canMutate}
           onCancel={() => setCreating(false)}
           onCreate={async (name, kind, isExternal, layout) => {
             let layoutId: string | null = null;
@@ -130,13 +150,23 @@ export default function StorageScreen() {
               const r = await run(`Create layout ${name}`, (m) =>
                 m.createLayout({ name, type: layout.type, config: layout.config }),
               );
-              if (!r.ok) return;
+              if (!r.ok) {
+                // Previously returned silently, so a failed creation looked
+                // like the button did nothing.
+                setCreateError(mutationFailureMessage(r.error));
+                return;
+              }
               layoutId = r.entityId;
             }
             const r = await run(`Create location ${name}`, (m) =>
               m.createLocation({ name, kind, layoutId, isExternal }),
             );
-            if (r.ok) setCreating(false);
+            if (r.ok) {
+              setCreateError(null);
+              setCreating(false);
+            } else {
+              setCreateError(mutationFailureMessage(r.error));
+            }
           }}
         />
       </Sheet>
@@ -167,9 +197,13 @@ type LayoutChoice =
  * location with no layout at all is a first-class choice.
  */
 function CreateLocationForm({
+  canMutate,
   onCancel,
   onCreate,
 }: {
+  /** Supplied by the parent screen. REQUIRED: a default would let a new
+   * call site skip the gate silently. */
+  canMutate: boolean;
   onCancel: () => void;
   onCreate: (
     name: string,
@@ -401,7 +435,7 @@ function CreateLocationForm({
         </Button>
         <Button
           fullWidth
-          disabled={!name.trim()}
+          disabled={!name.trim() || !canMutate}
           onClick={() => onCreate(name.trim(), kind, isExternal, build())}
         >
           Create

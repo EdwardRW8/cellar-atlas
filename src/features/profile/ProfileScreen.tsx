@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useCellar } from "@/hooks/useCellar";
+import { useCellar, mutationFailureMessage, mutationBlockMessage } from "@/hooks/useCellar";
+import { MutationBlockedNotice } from "@/components/MutationBlockedNotice";
 import { emptyProfile, type CellarProfile } from "@/domain/intelligence/types";
 import { Button } from "@/components/Button";
 import { Field } from "@/components/Field";
@@ -28,7 +29,11 @@ import { TOUCH_TARGET_MIN_PX } from "@/styles/tokens";
  * them.
  */
 export default function ProfileScreen() {
-  const { state, profile, run, refresh } = useCellar();
+  const { state, profile, run, refresh, canMutate, online, permissionState, role } =
+    useCellar();
+  // The label must say which of the four reasons applies — "You're offline"
+  // was shown to online viewers and to users mid-permission-check alike.
+  const blockedReason = mutationBlockMessage({ online, permissionState, role });
   const navigate = useNavigate();
 
   const [draft, setDraft] = useState<CellarProfile>(profile ?? emptyProfile());
@@ -80,7 +85,7 @@ export default function ProfileScreen() {
       setSaved(true);
       await refresh();
     } else {
-      setFailed(outcome.error ?? "Could not save. Your change is queued.");
+      setFailed(mutationFailureMessage(outcome.error));
     }
   };
 
@@ -210,8 +215,10 @@ export default function ProfileScreen() {
           />
         </Section>
 
-        <Button fullWidth disabled={busy} onClick={() => void save()}>
-          {busy ? "Saving…" : "Save profile"}
+        <MutationBlockedNotice />
+
+        <Button fullWidth disabled={busy || !canMutate} onClick={() => void save()}>
+          {busy ? "Saving…" : (blockedReason ?? "Save profile")}
         </Button>
       </div>
     </div>

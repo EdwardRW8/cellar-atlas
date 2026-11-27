@@ -21,7 +21,15 @@ vi.mock("react-router-dom", async () => {
 });
 
 let cellarState: Record<string, unknown>;
-vi.mock("@/hooks/useCellar", () => ({ useCellar: () => cellarState }));
+vi.mock("@/hooks/useCellar", async () => {
+  // Spread the real module: screens import message helpers from it as well as
+  // the hook, so a wholesale replacement leaves those undefined. That used to
+  // degrade silently; vitest now fails loudly on the missing export, which is
+  // the better outcome — the mock was hiding a real module boundary.
+  const actual =
+    await vi.importActual<typeof import("@/hooks/useCellar")>("@/hooks/useCellar");
+  return { ...actual, useCellar: () => cellarState };
+});
 
 const { default: Intelligence } =
   await import("@/features/intelligence/IntelligenceScreen");

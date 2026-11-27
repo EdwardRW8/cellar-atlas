@@ -1,3 +1,4 @@
+import { mutationFailureMessage } from "@/hooks/useCellar";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/Button";
 import { Field } from "@/components/Field";
@@ -62,10 +63,18 @@ export function validateEdit(draft: {
 }
 
 export function EditWineForm({
+  canMutate,
   wine,
   onCancel,
   onSave,
 }: {
+  /**
+   * May a change be attempted right now? Supplied by the parent, which owns
+   * the mutation. REQUIRED: a presentational component must not decide for
+   * itself whether mutating is safe, and a default would let a new call site
+   * silently skip the gate.
+   */
+  canMutate: boolean;
   wine: DomainWine;
   onCancel: () => void;
   onSave: (patch: EditWinePatch) => Promise<{ ok: boolean; error?: string | null }>;
@@ -141,7 +150,7 @@ export function EditWineForm({
 
     setBusy(false);
     if (!result.ok) {
-      setError(result.error ?? "Could not save. Your change is queued.");
+      setError(mutationFailureMessage(result.error));
     }
   };
 
@@ -289,7 +298,11 @@ export function EditWineForm({
         <Button variant="ghost" fullWidth onClick={onCancel}>
           Cancel
         </Button>
-        <Button fullWidth disabled={busy || problem !== null} onClick={() => void save()}>
+        <Button
+          fullWidth
+          disabled={busy || problem !== null || !canMutate}
+          onClick={() => void save()}
+        >
           {busy ? "Saving…" : "Save changes"}
         </Button>
       </div>

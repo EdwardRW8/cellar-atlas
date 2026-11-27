@@ -126,9 +126,6 @@ async function restRequest(
 }
 
 /**
- * Seed one searchable wine WITH an active bottle.
- *
- * The collection hides wines with no active bottles, so creating only a wine
  * The ONLY cellar this spec may write to.
  *
  * Replaces `limit=1` discovery, which took whatever cellar came back first.

@@ -1,3 +1,4 @@
+import { mutationFailureMessage } from "@/hooks/useCellar";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/Button";
 import { Field } from "@/components/Field";
@@ -52,12 +53,20 @@ export interface ValuationSubmission {
 }
 
 export function RecordValuationSheet({
+  canMutate,
   wine,
   activeBottles,
   defaultCurrency = "GBP",
   onCancel,
   onSubmit,
 }: {
+  /**
+   * May a change be attempted right now? Supplied by the parent, which owns
+   * the mutation. REQUIRED: a presentational component must not decide for
+   * itself whether mutating is safe, and a default would let a new call site
+   * silently skip the gate.
+   */
+  canMutate: boolean;
   wine: DomainWine;
   /** Active bottles only — the caller filters. */
   activeBottles: DomainBottle[];
@@ -113,7 +122,7 @@ export function RecordValuationSheet({
 
     setBusy(false);
     if (!result.ok) {
-      setError(result.error ?? "Could not save. Your change is queued.");
+      setError(mutationFailureMessage(result.error));
     }
   };
 
@@ -246,7 +255,11 @@ export function RecordValuationSheet({
         <Button variant="ghost" fullWidth onClick={onCancel}>
           Cancel
         </Button>
-        <Button fullWidth disabled={busy || parsed === null} onClick={() => void submit()}>
+        <Button
+          fullWidth
+          disabled={busy || parsed === null || !canMutate}
+          onClick={() => void submit()}
+        >
           {busy ? "Saving…" : "Record valuation"}
         </Button>
       </div>

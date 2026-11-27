@@ -59,6 +59,7 @@ function renderSheet(
   const onCancel = vi.fn();
   const r = render(
     <RecordValuationSheet
+      canMutate
       wine={WINE}
       activeBottles={activeBottles}
       onCancel={onCancel}

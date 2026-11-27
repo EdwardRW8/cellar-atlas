@@ -1,5 +1,11 @@
 import { useState } from "react";
-import { useCellar } from "@/hooks/useCellar";
+import {
+  useCellar,
+  OFFLINE_REASON,
+  mutationBlock,
+  mutationBlockMessage,
+} from "@/hooks/useCellar";
+import { MutationBlockedNotice } from "@/components/MutationBlockedNotice";
 import { Sheet } from "@/components/Sheet";
 import { Button } from "@/components/Button";
 import type { ConflictSummary } from "@/domain/conflict-rebase";
@@ -17,8 +23,14 @@ import { TOUCH_TARGET_MIN_PX } from "@/styles/tokens";
  * has validated its positions.
  */
 export function SyncStatusBar() {
-  const { pending, conflicts, failed, online } = useCellar();
+  const { pending, conflicts, failed, online, permissionState, role } = useCellar();
   const [open, setOpen] = useState(false);
+
+  // Only a FAILED permission check earns a place in the bar. A viewer's role
+  // is a settled fact rather than a fault, and a permanent banner stating it
+  // would be noise on every screen; a check still in flight resolves itself.
+  const permissionFailed =
+    mutationBlock({ online, permissionState, role }) === "permission-failed";
 
   const state =
     conflicts.length > 0
@@ -27,9 +39,11 @@ export function SyncStatusBar() {
         ? "failed"
         : pending.length > 0
           ? "pending"
-          : online
-            ? "synced"
-            : "offline";
+          : permissionFailed
+            ? "permission"
+            : online
+              ? "synced"
+              : "offline";
 
   // Nothing to say when everything is fine and we are online.
   if (state === "synced") return null;
@@ -41,7 +55,14 @@ export function SyncStatusBar() {
       label: `${conflicts.length} need${conflicts.length === 1 ? "s" : ""} your decision`,
     },
     failed: { colour: "var(--status-past)", label: `${failed.length} could not save` },
-    offline: { colour: "var(--status-approaching)", label: "Offline — changes will sync" },
+    permission: {
+      colour: "var(--status-past)",
+      label: "Permissions unavailable — changes are off",
+    },
+    offline: {
+      colour: "var(--status-approaching)",
+      label: "Offline — changes need a connection",
+    },
     synced: { colour: "var(--status-ready)", label: "Synced" },
   }[state];
 
@@ -106,10 +127,24 @@ function SyncDetail({ onClose }: { onClose: () => void }) {
             lineHeight: 1.6,
           }}
         >
-          You are offline. Changes are saved on this device and will sync when you
-          reconnect. Nothing is lost.
+          {/*
+              Previously claimed changes were "saved on this device and will
+              sync". Nothing is stored offline: there is no queue, so an
+              attempted change would simply be lost.
+            */}
+          {OFFLINE_REASON} You can keep looking around, but nothing can be changed or saved
+          until you reconnect.
         </p>
       )}
+
+      {/*
+        Guarded on `online` because the paragraph above already covers the
+        offline case in words specific to it; the notice would otherwise say
+        the same thing twice. Everything it adds — view-only access, a check
+        still running, a check that failed, with Retry — applies only when
+        there IS a connection.
+      */}
+      {online && <MutationBlockedNotice />}
 
       {conflicts.length > 0 && (
         <Section title="Needs your decision" colour="var(--status-approaching)">
@@ -242,7 +277,10 @@ function ConflictSheet({
   conflict: ConflictSummary;
   onClose: () => void;
 }) {
-  const { dismissConflict, repository, run } = useCellar();
+  // Resolving a conflict REAPPLIES a mutation, so it is gated like any other.
+  const { dismissConflict, repository, run, canMutate, online, permissionState, role } =
+    useCellar();
+  const blockedReason = mutationBlockMessage({ online, permissionState, role });
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
@@ -345,8 +383,13 @@ function ConflictSheet({
         )}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <Button disabled={busy || !conflict.canRebase} onClick={() => void keepMine()}>
-            {busy ? "Reapplying…" : "Keep mine — reapply to the latest version"}
+          <Button
+            disabled={busy || !conflict.canRebase || !canMutate}
+            onClick={() => void keepMine()}
+          >
+            {busy
+              ? "Reapplying…"
+              : (blockedReason ?? "Keep mine — reapply to the latest version")}
           </Button>
           <Button variant="ghost" onClick={useTheirs}>
             Use theirs — discard my change

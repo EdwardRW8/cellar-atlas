@@ -1,7 +1,7 @@
 import { useAuth } from "@/app/providers/AuthProvider";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useCellar } from "@/hooks/useCellar";
+import { useCellar, OFFLINE_REASON } from "@/hooks/useCellar";
 import { cellarValuation } from "@/domain/valuation";
 import { ValuationTotal } from "@/components/ValuationTotal";
 import {
@@ -293,7 +293,10 @@ const attentionRow: React.CSSProperties = {
  * leaving the button looking inert.
  */
 function FirstCellarOnboarding() {
-  const { createCellar, creatingCellar, error } = useCellar();
+  // canCreateCellar, NOT canMutate: a brand-new account has no membership
+  // and therefore no role, so a role-gated check would disable the very
+  // button that creates the cellar.
+  const { createCellar, creatingCellar, error, canCreateCellar } = useCellar();
   const { signOut } = useAuth();
   const [failed, setFailed] = useState<string | null>(null);
 
@@ -323,14 +326,18 @@ function FirstCellarOnboarding() {
 
       <Button
         fullWidth
-        disabled={creatingCellar}
+        disabled={creatingCellar || !canCreateCellar}
         onClick={async () => {
           setFailed(null);
           const r = await createCellar();
           if (!r.ok && r.error) setFailed(r.error);
         }}
       >
-        {creatingCellar ? "Creating…" : "Create my cellar"}
+        {creatingCellar
+          ? "Creating…"
+          : !canCreateCellar
+            ? OFFLINE_REASON
+            : "Create my cellar"}
       </Button>
 
       {/*

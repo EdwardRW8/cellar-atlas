@@ -15,7 +15,14 @@ import { mapBottleSize } from "@/domain/csv-import/mappings";
 import { emptyDraft, validatePlacement } from "@/domain/wine-draft";
 import { readFileSync } from "node:fs";
 
-vi.mock("@/hooks/useCellar", () => ({ useCellar: () => ({}) }));
+vi.mock("@/hooks/useCellar", async () => {
+  // Spread the real module: the screens import message helpers from it as
+  // well as the hook, and a wholesale replacement left those undefined —
+  // which silently degraded before and now fails loudly, correctly.
+  const actual =
+    await vi.importActual<typeof import("@/hooks/useCellar")>("@/hooks/useCellar");
+  return { ...actual, useCellar: () => ({}) };
+});
 const { BottleSizePicker } = await import("@/features/add-wine/AddWineScreen");
 
 afterEach(cleanup);

@@ -1,6 +1,11 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useCellar } from "@/hooks/useCellar";
+import {
+  useCellar,
+  mutationFailureMessage,
+  mutationBlockMessage,
+  MUTATION_BLOCK_MESSAGE,
+} from "@/hooks/useCellar";
 import { GeographyPicker, type GeoSelection } from "@/features/add-wine/GeographyPicker";
 import { Button } from "@/components/Button";
 import { EmptyState } from "@/components/EmptyState";
@@ -20,7 +25,8 @@ import { TOUCH_TARGET_MIN_PX } from "@/styles/tokens";
  * apply unchanged. No new RPC, no direct table write, no service role.
  */
 export default function GeographyFixScreen() {
-  const { state, wines, run } = useCellar();
+  const { state, wines, run, canMutate, online, permissionState, role } = useCellar();
+  const blockedReason = mutationBlockMessage({ online, permissionState, role });
   const navigate = useNavigate();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -45,6 +51,16 @@ export default function GeographyFixScreen() {
     name: string,
     selection: GeoSelection,
   ) => {
+    // This mutation fires from the picker's onChange — there is no button to
+    // disable — so the gate lives in the function itself, as well as on the
+    // picker below. It must SAY why: returning silently would look like the
+    // change was accepted.
+    if (!canMutate) {
+      // Nothing was sent, so this IS a definite outcome — and it must name the
+      // actual reason rather than blaming the connection.
+      setFailed(blockedReason ?? MUTATION_BLOCK_MESSAGE["read-only"]);
+      return;
+    }
     setBusyId(wineId);
     setFailed(null);
 
@@ -62,7 +78,7 @@ export default function GeographyFixScreen() {
 
     setBusyId(null);
     if (!outcome.ok) {
-      setFailed(outcome.error ?? "Could not save. Your change is queued.");
+      setFailed(mutationFailureMessage(outcome.error));
     }
   };
 
@@ -171,17 +187,33 @@ export default function GeographyFixScreen() {
                 </div>
               </div>
 
-              <GeographyPicker
-                value={{
-                  geoRegionId: null,
-                  countryCode: null,
-                  regionText: null,
-                  label: null,
-                }}
-                onChange={(selection) =>
-                  void apply(w.wine.id, w.wine.version, w.wine.name, selection)
-                }
-              />
+              {canMutate ? (
+                <GeographyPicker
+                  value={{
+                    geoRegionId: null,
+                    countryCode: null,
+                    regionText: null,
+                    label: null,
+                  }}
+                  onChange={(selection) =>
+                    void apply(w.wine.id, w.wine.version, w.wine.name, selection)
+                  }
+                />
+              ) : (
+                // Choosing a region here saves immediately, so when a change
+                // cannot be attempted the picker is replaced by the reason
+                // rather than left live. The reason is whichever of the four
+                // actually applies, not always the offline one.
+                <p
+                  style={{
+                    fontSize: "0.75rem",
+                    color: "var(--status-approaching)",
+                    lineHeight: 1.6,
+                  }}
+                >
+                  {blockedReason}
+                </p>
+              )}
 
               {busyId === w.wine.id && (
                 <p

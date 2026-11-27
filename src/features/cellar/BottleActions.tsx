@@ -56,7 +56,7 @@ export function BottleActionSheet({
   wineName: string;
   onClose: () => void;
 }) {
-  const { run, locations, bottles } = useCellar();
+  const { run, locations, bottles, canMutate } = useCellar();
   const [action, setAction] = useState<Action>("menu");
   const [tastingOrigin, setTastingOrigin] = useState<TastingOrigin>("direct");
   const [busy, setBusy] = useState(false);
@@ -165,6 +165,7 @@ export function BottleActionSheet({
         action === "sell" ||
         action === "lost") && (
         <StatusForm
+          canMutate={canMutate}
           action={action}
           busy={busy}
           onCancel={() => setAction("menu")}
@@ -184,6 +185,7 @@ export function BottleActionSheet({
 
       {action === "remove" && (
         <RemoveForm
+          canMutate={canMutate}
           busy={busy}
           onCancel={() => setAction("menu")}
           onConfirm={(reason) =>
@@ -201,6 +203,7 @@ export function BottleActionSheet({
 
       {(action === "move" || action === "deliver") && (
         <MoveForm
+          canMutate={canMutate}
           bottle={bottle}
           locations={locations}
           allBottles={bottles}
@@ -241,6 +244,7 @@ export function BottleActionSheet({
 
       {action === "tasting" && (
         <TastingForm
+          canMutate={canMutate}
           busy={busy}
           bottleName={wineName}
           onCancel={() => {
@@ -293,6 +297,7 @@ export function BottleActionSheet({
 
       {action === "valuation" && (
         <ValuationForm
+          canMutate={canMutate}
           busy={busy}
           onCancel={() => setAction("menu")}
           onConfirm={(amount, basis) =>
@@ -375,11 +380,15 @@ function ActionButton({
 }
 
 function StatusForm({
+  canMutate,
   action,
   busy,
   onCancel,
   onConfirm,
 }: {
+  /** Supplied by the parent, which owns the mutation. REQUIRED: a default
+   * would let a new call site skip the gate silently. */
+  canMutate: boolean;
   action: "consume" | "gift" | "sell" | "lost";
   busy: boolean;
   onCancel: () => void;
@@ -408,7 +417,7 @@ function StatusForm({
         </Button>
         <Button
           fullWidth
-          disabled={busy}
+          disabled={busy || !canMutate}
           onClick={() => onConfirm(new Date(date).toISOString(), notes)}
         >
           {busy ? "Saving…" : ACTION_TITLES[action]}
@@ -419,10 +428,14 @@ function StatusForm({
 }
 
 function RemoveForm({
+  canMutate,
   busy,
   onCancel,
   onConfirm,
 }: {
+  /** Supplied by the parent, which owns the mutation. REQUIRED: a default
+   * would let a new call site skip the gate silently. */
+  canMutate: boolean;
   busy: boolean;
   onCancel: () => void;
   onConfirm: (reason: string) => void;
@@ -448,7 +461,7 @@ function RemoveForm({
         <Button
           variant="danger"
           fullWidth
-          disabled={busy || !reason.trim()}
+          disabled={busy || !reason.trim() || !canMutate}
           onClick={() => onConfirm(reason.trim())}
         >
           {busy ? "Saving…" : "Remove record"}
@@ -459,6 +472,7 @@ function RemoveForm({
 }
 
 function MoveForm({
+  canMutate,
   bottle,
   locations,
   allBottles,
@@ -467,6 +481,9 @@ function MoveForm({
   onCancel,
   onConfirm,
 }: {
+  /** Supplied by the parent, which owns the mutation. REQUIRED: a default
+   * would let a new call site skip the gate silently. */
+  canMutate: boolean;
   bottle: DomainBottle;
   locations: ReturnType<typeof useCellar>["locations"];
   allBottles: DomainBottle[];
@@ -523,7 +540,7 @@ function MoveForm({
         </Button>
         <Button
           fullWidth
-          disabled={busy || !ready}
+          disabled={busy || !ready || !canMutate}
           onClick={() => onConfirm(locationId!, position)}
         >
           {busy ? "Moving…" : isDelivery ? "Deliver home" : "Move"}
@@ -534,11 +551,15 @@ function MoveForm({
 }
 
 function TastingForm({
+  canMutate,
   busy,
   bottleName,
   onCancel,
   onConfirm,
 }: {
+  /** Supplied by the parent, which owns the mutation. REQUIRED: a default
+   * would let a new call site skip the gate silently. */
+  canMutate: boolean;
   busy: boolean;
   bottleName: string;
   onCancel: () => void;
@@ -633,7 +654,7 @@ function TastingForm({
         </Button>
         <Button
           fullWidth
-          disabled={busy}
+          disabled={busy || !canMutate}
           onClick={() =>
             onConfirm(rating || undefined, notes, date, context.trim() || undefined)
           }
@@ -647,10 +668,14 @@ function TastingForm({
 }
 
 function ValuationForm({
+  canMutate,
   busy,
   onCancel,
   onConfirm,
 }: {
+  /** Supplied by the parent, which owns the mutation. REQUIRED: a default
+   * would let a new call site skip the gate silently. */
+  canMutate: boolean;
   busy: boolean;
   onCancel: () => void;
   onConfirm: (
@@ -735,7 +760,7 @@ function ValuationForm({
         </Button>
         <Button
           fullWidth
-          disabled={busy || !amount}
+          disabled={busy || !amount || !canMutate}
           onClick={() => onConfirm(Number(amount), basis)}
         >
           {busy ? "Saving…" : "Save valuation"}

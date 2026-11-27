@@ -21,6 +21,12 @@ import {
   type ReactNode,
 } from "react";
 import { useAuth } from "@/app/providers/AuthProvider";
+import {
+  classifyLoadError,
+  mutationFailureMessage,
+  type LoadErrorKind,
+  type PermissionState,
+} from "@/domain/mutation-messaging";
 import { useOnline } from "./useOnline";
 import { CellarRepository } from "@/data/repositories/cellar-repository";
 import {
@@ -46,25 +52,28 @@ import {
 export type LoadState = "loading" | "ready" | "no-cellar" | "error";
 
 /**
- * Why loading failed, when it did.
+ * Every sentence about a change that cannot be made, or whose outcome is not
+ * known, lives in one pure module and is re-exported here so that existing
+ * import sites — and the durability guard — keep working unchanged.
  *
- * These need different words and different actions: a permission problem is
- * not a network problem, and neither is "you have no cellar yet".
+ * Why it moved: the messages now need CLASSIFYING, not just displaying, and
+ * classification belongs somewhere testable without rendering a provider.
  */
-export type LoadErrorKind = "permission" | "network" | "unknown";
-
-/** Classify a failure WITHOUT guessing: anything unrecognised stays unknown. */
-export function classifyLoadError(message: string): LoadErrorKind {
-  const m = message.toLowerCase();
-  if (
-    /row-level security|row level security|permission denied|not authorized|jwt|forbidden/.test(
-      m,
-    )
-  )
-    return "permission";
-  if (/failed to fetch|network|offline|timeout|econn|unreachable/.test(m)) return "network";
-  return "unknown";
-}
+export {
+  OFFLINE_REASON,
+  NOT_SAVED,
+  NOT_CONFIRMED,
+  MUTATION_BLOCK_MESSAGE,
+  classifyLoadError,
+  mutationFailureMessage,
+  mutationBlock,
+  mutationBlockMessage,
+} from "@/domain/mutation-messaging";
+export type {
+  LoadErrorKind,
+  PermissionState,
+  MutationBlock,
+} from "@/domain/mutation-messaging";
 
 interface CellarValue {
   state: LoadState;
@@ -106,6 +115,50 @@ interface CellarValue {
    * a server-side fix.
    */
   createCellar: () => Promise<{ ok: boolean; error?: string }>;
+
+  /**
+   * May the user attempt a change right now?
+   *
+   * ── WHAT THIS IS, AND WHAT IT IS NOT ───────────────────────────────────
+   * Connectivity AND permission: the user must be online, and must not be a
+   * viewer, whose writes RLS would refuse. The connectivity half is from
+   * `navigator.onLine`. That reports whether a network interface exists — NOT
+   * whether Supabase is reachable. It reads "online" behind a captive portal,
+   * on a dead Wi-Fi link, and while the backend is down.
+   *
+   * So `canMutate === true` means "worth attempting", never "this will
+   * succeed", and nothing in the UI may present it as proof the backend is
+   * reachable. A request can still fail while apparently online, which is why
+   * every failure says plainly that nothing was saved.
+   *
+   * There is no offline queue: a change that cannot be sent is not kept.
+   * Blocking the attempt is what keeps that honest.
+   *
+   * If reachability is ever needed it belongs here, as a health check — this
+   * is the single place every entry point reads.
+   */
+  canMutate: boolean;
+
+  /**
+   * This user's role in the current cellar, or null when it is not known.
+   *
+   * RLS remains authoritative: this only decides whether the UI offers a
+   * control.
+   */
+  role: string | null;
+
+  /** Whether the permission check completed, and whether it succeeded. */
+  permissionState: PermissionState;
+
+  /** Retry a failed permission check without reloading the whole cellar. */
+  recheckPermission: () => Promise<void>;
+
+  /**
+   * May this user create their first cellar? Separate from `canMutate`,
+   * because a fresh account has no role yet and a role-gated check would
+   * block the only action available to it.
+   */
+  canCreateCellar: boolean;
   refresh: () => Promise<void>;
   mutations: MutationRepository | null;
   repository: CellarRepository | null;
@@ -144,6 +197,8 @@ export function CellarProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [errorKind, setErrorKind] = useState<LoadErrorKind>("unknown");
   const [creatingCellar, setCreatingCellar] = useState(false);
+  const [role, setRole] = useState<string | null>(null);
+  const [permissionState, setPermissionState] = useState<PermissionState>("unknown");
   const creatingRef = useRef(false);
   const [cellarId, setCellarId] = useState<string | null>(null);
 
@@ -162,6 +217,31 @@ export function CellarProvider({ children }: { children: ReactNode }) {
 
   const repoRef = useRef<CellarRepository | null>(null);
   const mutRef = useRef<MutationRepository | null>(null);
+
+  /**
+   * May this user change data right now?
+   *
+   * FAILS CLOSED. This previously read `role !== "viewer"`, which treated an
+   * unknown or failed role lookup as permission to write — so a blip during
+   * the permission check produced controls that could not work. Only a
+   * CONFIRMED owner or editor enables writes.
+   *
+   * A failed check is recoverable, not terminal: `permissionState` becomes
+   * "failed" and `recheckPermission()` retries it, so nobody is stranded
+   * read-only until a full reload.
+   */
+  const canMutate =
+    online && permissionState === "known" && (role === "owner" || role === "editor");
+
+  /**
+   * May this user create their FIRST cellar?
+   *
+   * Deliberately NOT `canMutate`. A brand-new account has no membership and
+   * so no role, and a role-gated check would disable the very button that
+   * creates the cellar the role would come from. What authorises this is the
+   * "create cellars" policy (`created_by = auth.uid()`), not a membership row.
+   */
+  const canCreateCellar = Boolean(session) && online && state === "no-cellar";
 
   const load = useCallback(
     async (explicitCellarId?: string) => {
@@ -191,6 +271,15 @@ export function CellarProvider({ children }: { children: ReactNode }) {
         // Profile failure must not block the cellar: intelligence degrades,
         // the collection still loads.
         const loadedProfile = await repo.loadCellarProfile().catch(() => null);
+        // Permission, for the UI only; RLS remains the authority on writes.
+        // A failure is RECORDED, never assumed to mean permission.
+        try {
+          setRole(await repo.loadMyRole(session.user.id));
+          setPermissionState("known");
+        } catch {
+          setRole(null);
+          setPermissionState("failed");
+        }
         setProfile(loadedProfile);
 
         // Valuation currency and acquisition cost. Both are additive: a failure
@@ -226,6 +315,24 @@ export function CellarProvider({ children }: { children: ReactNode }) {
     },
     [session, cellarId],
   );
+
+  /**
+   * Retry a failed permission check on its own.
+   *
+   * Without this, a transient failure during load would leave the user
+   * read-only until they reloaded the whole app.
+   */
+  const recheckPermission = useCallback(async () => {
+    const repo = repoRef.current;
+    if (!session || !repo) return;
+    try {
+      setRole(await repo.loadMyRole(session.user.id));
+      setPermissionState("known");
+    } catch {
+      setRole(null);
+      setPermissionState("failed");
+    }
+  }, [session]);
 
   const createCellar = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
     // Re-entrancy guard, held in a REF rather than state: two clicks in the
@@ -320,12 +427,16 @@ export function CellarProvider({ children }: { children: ReactNode }) {
             ]);
           }
         } else if (!outcome.ok) {
+          // The server may have answered "no", or the request may never have
+          // come back at all — Supabase reports a lost request as an error
+          // rather than by throwing. `mutationFailureMessage` tells those two
+          // apart so an unconfirmed operation is not described as refused.
           setFailed((f) => [
             ...f,
             {
               operationId: outcome.operationId,
               description,
-              reason: outcome.error ?? "The server rejected this change",
+              reason: mutationFailureMessage(outcome.error),
             },
           ]);
         }
@@ -337,10 +448,16 @@ export function CellarProvider({ children }: { children: ReactNode }) {
         if (announced) {
           setPending((p) => p.filter((x) => x.operationId !== placeholder.operationId));
         }
+        // A throw is the strongest signal that no answer arrived, so this
+        // path must never claim the change was not recorded.
         const message = e instanceof Error ? e.message : "Something went wrong";
         setFailed((f) => [
           ...f,
-          { operationId: placeholder.operationId, description, reason: message },
+          {
+            operationId: placeholder.operationId,
+            description,
+            reason: mutationFailureMessage(message),
+          },
         ]);
         return {
           ok: false,
@@ -391,6 +508,11 @@ export function CellarProvider({ children }: { children: ReactNode }) {
       // and `onClick={refresh}` would hand it a click event. Callers get a
       // plain reload with no way to choose the cellar.
       refresh: () => load(),
+      canMutate,
+      canCreateCellar,
+      role,
+      permissionState,
+      recheckPermission,
       runBatch,
       mutations: mutRef.current,
       repository: repoRef.current,
@@ -418,6 +540,13 @@ export function CellarProvider({ children }: { children: ReactNode }) {
       errorKind,
       creatingCellar,
       createCellar,
+      // Omitting these would leave consumers on a stale value: the whole
+      // point of canMutate is that it changes when connectivity or role does.
+      canMutate,
+      canCreateCellar,
+      role,
+      permissionState,
+      recheckPermission,
       load,
       run,
       runBatch,

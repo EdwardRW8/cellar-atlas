@@ -102,3 +102,25 @@ describe("double-click cannot start two imports", () => {
     expect(execute).toMatch(/setError\(/);
   });
 });
+
+describe("PHASE 12.1: the importer cannot be started offline", () => {
+  it("the confirm button is gated on canMutate", () => {
+    expect(SRC).toMatch(
+      /disabled=\{blocked \|\| \(needsAck && !acknowledged\) \|\| !canMutate\}/,
+    );
+  });
+
+  it("the gate comes from useCellar, not a local connectivity check", () => {
+    expect(SRC).toMatch(
+      /canMutate,?\s*\}?\s*=\s*useCellar\(\)|canMutate\s*\}\s*=\s*useCellar\(\)/,
+    );
+    expect(SRC).not.toMatch(/navigator\.onLine/);
+  });
+
+  it("an import that fails still says nothing was recorded", () => {
+    // The importer reports per-step outcomes; none of them may claim the work
+    // was kept for later.
+    expect(SRC).not.toMatch(/\bis queued\b/i);
+    expect(SRC).not.toMatch(/will\s+sync/i);
+  });
+});

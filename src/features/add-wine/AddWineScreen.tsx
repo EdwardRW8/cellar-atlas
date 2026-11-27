@@ -8,7 +8,8 @@ import {
   parseMillilitres,
 } from "@/domain/bottle-size";
 import { useNavigate } from "react-router-dom";
-import { useCellar } from "@/hooks/useCellar";
+import { useCellar, mutationFailureMessage, mutationBlockMessage } from "@/hooks/useCellar";
+import { MutationBlockedNotice } from "@/components/MutationBlockedNotice";
 import {
   emptyDraft,
   setField,
@@ -40,7 +41,18 @@ const COLOURS: WineColour[] = ["Red", "White", "Rosé", "Sparkling", "Dessert", 
 
 export default function AddWineScreen() {
   const navigate = useNavigate();
-  const { wines, locations, bottles, run, state } = useCellar();
+  const {
+    wines,
+    locations,
+    bottles,
+    run,
+    state,
+    canMutate,
+    online,
+    permissionState,
+    role,
+  } = useCellar();
+  const blockedReason = mutationBlockMessage({ online, permissionState, role });
 
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<WineDraft>(emptyDraft);
@@ -115,7 +127,7 @@ export default function AddWineScreen() {
 
     setSubmitting(false);
     if (outcome.ok) navigate("/cellar");
-    else setSubmitError(outcome.error ?? "Could not save. Your change is queued.");
+    else setSubmitError(mutationFailureMessage(outcome.error));
   };
 
   if (state === "loading") {
@@ -190,6 +202,13 @@ export default function AddWineScreen() {
         />
       )}
 
+      {/*
+        Only on the final step: this is where the write is attempted, and a
+        reason shown three steps early would be noise. Carries Retry when the
+        permission check is what failed.
+      */}
+      {step === 3 && <MutationBlockedNotice />}
+
       <nav style={{ display: "flex", gap: 8, marginTop: "1.75rem" }}>
         {step > 0 && (
           <Button variant="ghost" onClick={() => setStep(step - 1)}>
@@ -205,10 +224,15 @@ export default function AddWineScreen() {
             Continue
           </Button>
         ) : (
-          <Button fullWidth disabled={submitting} onClick={() => void submit()}>
+          <Button
+            fullWidth
+            disabled={submitting || !canMutate}
+            onClick={() => void submit()}
+          >
             {submitting
               ? "Saving…"
-              : `Add ${draft.quantity} bottle${draft.quantity === 1 ? "" : "s"}`}
+              : (blockedReason ??
+                `Add ${draft.quantity} bottle${draft.quantity === 1 ? "" : "s"}`)}
           </Button>
         )}
       </nav>

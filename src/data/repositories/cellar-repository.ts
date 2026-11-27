@@ -131,6 +131,24 @@ export class CellarRepository {
     return id;
   }
 
+  /**
+   * This user's role in this cellar, or null when there is no membership row.
+   *
+   * SELECT only, under the member's own session. Used to decide whether the UI
+   * offers write controls; RLS remains the authority on whether a write is
+   * actually allowed.
+   */
+  async loadMyRole(userId: string): Promise<string | null> {
+    const { data, error } = await this.sb
+      .from("cellar_members")
+      .select("role")
+      .eq("cellar_id", this.cellarId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return (data?.role as string | undefined) ?? null;
+  }
+
   async loadGeographyIndex(): Promise<Map<string, GeoRow>> {
     const { data, error } = await this.sb
       .from("geo_regions")

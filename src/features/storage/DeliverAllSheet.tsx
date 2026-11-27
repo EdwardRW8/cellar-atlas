@@ -30,6 +30,7 @@ import type { DomainBottle, DomainStorageLocation, DomainWine } from "@/domain/t
  * No staircase or grid rule appears in this file.
  */
 export function DeliverAllSheet({
+  canMutate,
   bottles,
   wines,
   destinations,
@@ -37,6 +38,13 @@ export function DeliverAllSheet({
   onCancel,
   onDeliver,
 }: {
+  /**
+   * May a change be attempted right now? Supplied by the parent, which owns
+   * the mutation. REQUIRED: a presentational component must not decide for
+   * itself whether mutating is safe, and a default would let a new call site
+   * silently skip the gate.
+   */
+  canMutate: boolean;
   bottles: DomainBottle[];
   wines: Map<string, DomainWine>;
   destinations: DomainStorageLocation[];
@@ -279,7 +287,9 @@ export function DeliverAllSheet({
 
           <Button
             fullWidth
-            disabled={busy || chosen.length === 0 || !destinationId || !allAssigned}
+            disabled={
+              busy || chosen.length === 0 || !destinationId || !allAssigned || !canMutate
+            }
             onClick={async () => {
               setBusy(true);
               const outcome = await onDeliver(

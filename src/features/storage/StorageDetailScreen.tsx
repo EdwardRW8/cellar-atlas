@@ -36,7 +36,7 @@ const RackRenderer = lazy(() => import("./rack/RackRenderer"));
 export default function StorageDetailScreen() {
   const { locationId } = useParams();
   const navigate = useNavigate();
-  const { locations, bottles, wines, run, runBatch } = useCellar();
+  const { locations, bottles, wines, run, runBatch, canMutate } = useCellar();
   const [editing, setEditing] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [view, setView] = useState<"rack" | "list">("rack");
@@ -175,7 +175,11 @@ export default function StorageDetailScreen() {
           </Button>
           {/* Bulk delivery only makes sense from external storage. */}
           {location.isExternal && contents.length > 0 && (
-            <Button variant="secondary" onClick={() => setDelivering(true)}>
+            <Button
+              variant="secondary"
+              disabled={!canMutate}
+              onClick={() => setDelivering(true)}
+            >
               Deliver all
             </Button>
           )}
@@ -256,6 +260,7 @@ export default function StorageDetailScreen() {
 
       <Sheet open={delivering} onClose={() => setDelivering(false)} title="Deliver home">
         <DeliverAllSheet
+          canMutate={canMutate}
           bottles={contents.map((c) => c.bottle)}
           wines={new Map(wines.map((w) => [w.wine.id, w.wine]))}
           destinations={locations.filter((l) => !l.isExternal && l.id !== location.id)}
@@ -278,6 +283,7 @@ export default function StorageDetailScreen() {
 
       <Sheet open={editing} onClose={() => setEditing(false)} title="Edit location">
         <EditLocationForm
+          canMutate={canMutate}
           location={location}
           bottles={bottles.filter((b) => b.isActive && b.storageLocationId === location.id)}
           onCancel={() => setEditing(false)}
@@ -315,6 +321,7 @@ export default function StorageDetailScreen() {
 
       <Sheet open={removing} onClose={() => setRemoving(false)} title="Remove location">
         <RemoveLocationForm
+          canMutate={canMutate}
           occupied={occupancy.occupied}
           name={location.name}
           onCancel={() => setRemoving(false)}
@@ -345,12 +352,16 @@ export default function StorageDetailScreen() {
  * The database remains authoritative — this is a courtesy, not a substitute.
  */
 function EditLocationForm({
+  canMutate,
   location,
   bottles,
   onCancel,
   onSaveName,
   onSaveGeometry,
 }: {
+  /** Supplied by the parent screen. REQUIRED: a default would let a new
+   * call site skip the gate silently. */
+  canMutate: boolean;
   location: ReturnType<typeof useCellar>["locations"][number];
   bottles: ReturnType<typeof useCellar>["bottles"];
   onCancel: () => void;
@@ -404,7 +415,7 @@ function EditLocationForm({
 
       <Button
         fullWidth
-        disabled={busy || !name.trim() || name === location.name}
+        disabled={busy || !name.trim() || name === location.name || !canMutate}
         onClick={async () => {
           setBusy(true);
           await onSaveName(name.trim());
@@ -467,7 +478,7 @@ function EditLocationForm({
 
           <Button
             fullWidth
-            disabled={busy || conflicts.length > 0 || !geometryChanged}
+            disabled={busy || conflicts.length > 0 || !geometryChanged || !canMutate}
             onClick={async () => {
               setBusy(true);
               if (proposed) await onSaveGeometry(proposed);
@@ -589,11 +600,15 @@ function buildConfig(
 }
 
 function RemoveLocationForm({
+  canMutate,
   occupied,
   name,
   onCancel,
   onRemove,
 }: {
+  /** Supplied by the parent screen. REQUIRED: a default would let a new
+   * call site skip the gate silently. */
+  canMutate: boolean;
   occupied: number;
   name: string;
   onCancel: () => void;
@@ -646,7 +661,7 @@ function RemoveLocationForm({
         <Button
           variant="danger"
           fullWidth
-          disabled={busy || !reason.trim()}
+          disabled={busy || !reason.trim() || !canMutate}
           onClick={async () => {
             setBusy(true);
             await onRemove(reason.trim());

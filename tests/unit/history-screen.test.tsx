@@ -21,7 +21,15 @@ vi.mock("react-router-dom", async () => {
 });
 
 let cellarState: Record<string, unknown>;
-vi.mock("@/hooks/useCellar", () => ({ useCellar: () => cellarState }));
+vi.mock("@/hooks/useCellar", async () => {
+  // Spread the real module: screens import message helpers from it as well as
+  // the hook, so a wholesale replacement leaves those undefined. That used to
+  // degrade silently; vitest now fails loudly on the missing export, which is
+  // the better outcome — the mock was hiding a real module boundary.
+  const actual =
+    await vi.importActual<typeof import("@/hooks/useCellar")>("@/hooks/useCellar");
+  return { ...actual, useCellar: () => cellarState };
+});
 
 const { default: HistoryScreen } = await import("@/features/history/HistoryScreen");
 const { default: TastingLogScreen } = await import("@/features/tasting/TastingLogScreen");
@@ -82,6 +90,13 @@ function renderTastings(list: TastingRecord[], over: Record<string, unknown> = {
   const run = vi.fn().mockResolvedValue({ ok: true });
   cellarState = {
     state: "ready",
+    // Writing is now gated on a CONFIRMED role. Without these the Save
+    // control is correctly disabled, and the test would be asserting against
+    // a button it could never press.
+    online: true,
+    canMutate: true,
+    role: "owner",
+    permissionState: "known",
     repository: { loadAllTastings: vi.fn().mockResolvedValue(list) },
     run,
     ...over,

@@ -24,7 +24,14 @@ import type { DomainWine, WineColour } from "@/domain/types";
  */
 const stubRepository = { searchGeography: vi.fn().mockResolvedValue([]) };
 const stubCellar = { repository: stubRepository };
-vi.mock("@/hooks/useCellar", () => ({ useCellar: () => stubCellar }));
+vi.mock("@/hooks/useCellar", async () => {
+  // Spread the real module: the screens import message helpers from it as
+  // well as the hook, and a wholesale replacement left those undefined —
+  // which silently degraded before and now fails loudly, correctly.
+  const actual =
+    await vi.importActual<typeof import("@/hooks/useCellar")>("@/hooks/useCellar");
+  return { ...actual, useCellar: () => stubCellar };
+});
 
 afterEach(cleanup);
 
@@ -55,7 +62,7 @@ function renderForm(w: DomainWine = wine()) {
   const onCancel = vi.fn();
   const r = render(
     <MemoryRouter>
-      <EditWineForm wine={w} onCancel={onCancel} onSave={onSave} />
+      <EditWineForm canMutate wine={w} onCancel={onCancel} onSave={onSave} />
     </MemoryRouter>,
   );
   return { ...r, onSave, onCancel };
@@ -275,7 +282,7 @@ describe("validation", () => {
     const onSave = vi.fn().mockResolvedValue({ ok: false, error: "version conflict" });
     render(
       <MemoryRouter>
-        <EditWineForm wine={wine()} onCancel={vi.fn()} onSave={onSave} />
+        <EditWineForm canMutate wine={wine()} onCancel={vi.fn()} onSave={onSave} />
       </MemoryRouter>,
     );
     fireEvent.click(saveButton());

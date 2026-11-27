@@ -93,7 +93,7 @@ interface StepResult {
 }
 
 export default function ImportScreen() {
-  const { repository, run, refresh, locations, bottles } = useCellar();
+  const { repository, run, refresh, locations, bottles, canMutate } = useCellar();
   const navigate = useNavigate();
   const fileInput = useRef<HTMLInputElement>(null);
   /**
@@ -574,6 +574,7 @@ export default function ImportScreen() {
 
       {stage === "preview" && parsed && (
         <Preview
+          canMutate={canMutate}
           parsed={parsed}
           plan={plan}
           groups={groups}
@@ -609,6 +610,7 @@ export default function ImportScreen() {
 }
 
 function Preview({
+  canMutate,
   parsed,
   plan,
   groups,
@@ -618,6 +620,9 @@ function Preview({
   onBack,
   onConfirm,
 }: {
+  /** Supplied by the parent screen. REQUIRED: a default would let a new
+   * call site skip the gate silently. */
+  canMutate: boolean;
   parsed: ParseResult;
   plan: ImportPlan | null;
   groups: PlannedAcquisition[];
@@ -785,7 +790,7 @@ function Preview({
         </Button>
         <Button
           fullWidth
-          disabled={blocked || (needsAck && !acknowledged)}
+          disabled={blocked || (needsAck && !acknowledged) || !canMutate}
           onClick={onConfirm}
         >
           Import {c.bottlesToCreate} bottle{c.bottlesToCreate === 1 ? "" : "s"}
