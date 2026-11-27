@@ -178,9 +178,77 @@ each is a real gap. Priority is my assessment, not a decision.
 | 7f | **README CSV import section is stale.** It does not match the allowed values now read from `mappings.ts` and `parse.ts`. | Users follow wrong guidance | Low, until the importer is used by others |
 | 7g | **Master project context document is stale.** It states 12.0 awaits commit and production is `f8fb682`. | Misleads a future session | Low, but cheap to fix |
 | 7h | **GitHub push token expiry.** Credential maintenance is manual and undocumented. | Blocks deployment at the worst moment | Low |
+| 7i | **Ordinary mutations mint a fresh operation id per call.** Only `changeStatus`, `recordTasting` and `recordValuation` accept a caller-supplied id, and only the CSV importer passes one. So `claim_operation` cannot deduplicate a user-initiated retry of `commitDraft`, `updateWine`, `moveBottle`, `correctBottle`, `upsertProfile` or `createLocation`. | A retry after a lost response can double-apply; 12.1's `NOT_CONFIRMED` wording exists precisely because this cannot be promised away | **High before community bottle transfers.** A transfer moves a bottle between cellars, so a duplicated transfer is a duplicated or vanished physical bottle in someone else's collection |
+| 7j | **Stale comment in `useCellar.run()`.** It still says the pending slot lets the UI "show it as queued", which is the vocabulary 12.1 removed everywhere else — there is no queue. The code is correct; only the comment misleads. | A future reader implements against a queue that does not exist | Low, but it is the same class of defect as the "treated as permitted" comment the audit caught |
+| 7k | **`mutationFailureMessage(undefined)` returns `NOT_SAVED`.** When an outcome is `ok: false` with no error detail, the app states definitively that nothing was recorded. That is the right default for a server rejection, but an outcome carrying no detail is arguably unknown rather than known-failed. | A false guarantee in the one case where there is least evidence | Low — it needs an audit of which mutation paths can return `ok: false` with no error, which is why it was recorded rather than changed |
+
+### Note on 7i
+
+Recorded from the 12.3 audit. The asymmetry is deliberate and tested — see
+`tests/unit/mutation-messaging.test.tsx`, which pins that ordinary mutations
+generate a fresh id while the importer supplies a stable one. Closing it means
+threading a stable id from each screen's submit handler, which changes every
+mutation entry point and so belongs in its own gate, not folded into another.
 
 ### Note on 7b
 
 The fix is small — classify an expired or missing session as its own kind and
 prompt a re-sign-in — but it changes how `classifyLoadError` behaves, which
 12.1 tests pin. It belongs in its own change, not folded into another gate.
+
+---
+
+## 8. Backups are implemented but protect nothing until the owner acts
+
+**Found:** gate 12.3, by design rather than as a defect.
+
+`docs/disaster-recovery.md` opens with four states: code tested,
+infrastructure configured, backups succeeding, restore verified. **Only the
+first is true.** The scripts and their tests exist; no age key pair exists, no
+bucket exists, and `BACKUP_ENABLED` is unset, so the workflow exits without
+doing anything.
+
+This is deliberate — the gate was explicitly not permitted to provision
+infrastructure — but it means **the collection is still unbacked up today**.
+Until the owner completes the five steps in that document and records a dated
+restore drill, 12.3 has changed nothing about the actual risk.
+
+**Suggested closure:** do the owner actions, then the drill, then date the log
+table at the end of `docs/disaster-recovery.md`. Treat an undated drill log as
+proof the drill never happened.
+
+---
+
+## 9. A disabled scheduled workflow stops backups silently
+
+**Found:** gate 12.3.
+
+GitHub disables scheduled workflows in repositories with no activity for 60
+days, and does so **without failing them**. The failure alerting in
+`backup.yml` cannot catch this, because nothing runs to raise the alert. A
+repository that goes quiet therefore stops being backed up, and the only
+visible symptom is an absence.
+
+**Mitigation today:** documented as a monthly manual check of the bucket's
+newest manifest.
+
+**Suggested closure:** an external dead-man's-switch — a monitor that alerts on
+the *absence* of a fresh manifest rather than on a failure. That is new
+infrastructure and was out of scope here.
+
+---
+
+## 10. The restore path is documented but has never been executed
+
+**Found:** gate 12.3.
+
+The decrypt-and-restore procedure in `docs/disaster-recovery.md` is written
+from Supabase's and `age`'s documented behaviour, not from a performed restore.
+The encryption round-trip **is** genuinely tested, with a real key pair, in
+`tests/unit/backup-safety.test.ts`. The `pg_dump`/`psql` sequence is not: it
+needs a live Postgres server and a real project, and neither was available or
+permitted here.
+
+Expect friction on first attempt, particularly around pre-existing Supabase
+roles and extensions on the schema step. **Do not let the first attempt be
+during an outage.**

@@ -1,0 +1,264 @@
+name: Encrypted database backup
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THIS WORKFLOW SHIPS INERT.
+#
+# Every job is gated on the repository variable BACKUP_ENABLED being "true".
+# Until the owner sets it — after generating the age key pair, creating the
+# private bucket, AND completing the local integration test in
+# docs/disaster-recovery.md — the workflow runs, reports that backups are not
+# configured, and exits successfully. Merging this patch provisions nothing
+# and raises no false alarms.
+#
+# WHAT THIS FILE MUST NEVER DO, and what tests/unit/backup-safety.test.ts
+# asserts it does not:
+#
+#   - reference the database credential except through `secrets.*`
+#   - echo, print, cat or `set -x` anything carrying a credential
+#   - upload an artifact (on a public repository, Actions artifacts are
+#     downloadable by other GitHub users — an unencrypted dump there would
+#     publish the whole collection and the auth table with it)
+#   - upload anything before encryption
+#   - prune before the upload has been VERIFIED
+#   - delete by wildcard or by stem
+#
+# The ordering guarantees are structural rather than rules we remember:
+# run-backup.mjs encrypts each dump and deletes the plaintext before it
+# exits, so the upload step has no plaintext left to upload; and the prune
+# step consumes exact object names produced by prune.mjs, so there is no
+# pattern that could match an unrelated object.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    # 03:17 UTC daily. Off the hour because the top of the hour is the busiest
+    # slot on GitHub's scheduler and scheduled runs there are often delayed.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Plan only: connect to nothing, write nothing, upload nothing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  # Only so a failed backup can open an issue. A silent backup failure is
+  # indistinguishable from a working backup until the day it matters.
+  issues: write
+
+# Never two backups at once: they would race on the prune step.
+concurrency:
+  group: database-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check whether backups are configured
+        id: gate
+        run: |
+          set -euo pipefail
+          if [ "${BACKUP_ENABLED}" != "true" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Backups not enabled::Set the BACKUP_ENABLED repository variable to 'true' after completing the owner setup AND the local integration test in docs/disaster-recovery.md. Nothing was backed up."
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          BACKUP_ENABLED: ${{ vars.BACKUP_ENABLED }}
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.enabled == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          node-version: "20"
+
+      - name: Install age and the Postgres client
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          # postgresql-client-16 matches Supabase's current major version. A
+          # pg_dump OLDER than the server refuses to run at all, which is a
+          # loud failure; a newer one is fine. Pinned so an Ubuntu image
+          # change cannot silently downgrade it.
+          sudo apt-get install -y -qq age postgresql-client-16
+          pg_dump --version
+          age --version
+
+      - name: Confirm the required configuration is present
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          missing=""
+          # -z tests emptiness WITHOUT printing the value.
+          [ -z "${DATABASE_URL}" ] && missing="$missing DATABASE_URL"
+          [ -z "${R2_ACCESS_KEY_ID}" ] && missing="$missing R2_ACCESS_KEY_ID"
+          [ -z "${R2_SECRET_ACCESS_KEY}" ] && missing="$missing R2_SECRET_ACCESS_KEY"
+          [ -z "${R2_ENDPOINT}" ] && missing="$missing R2_ENDPOINT"
+          [ -z "${R2_BUCKET}" ] && missing="$missing R2_BUCKET"
+          if [ -n "$missing" ]; then
+            echo "::error title=Backup not configured::Missing:$missing — see docs/disaster-recovery.md"
+            exit 1
+          fi
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+
+      - name: Plan the backup (no connection, no data)
+        if: steps.gate.outputs.enabled == 'true'
+        run: node scripts/backup/run-backup.mjs --out "$RUNNER_TEMP/plan" --dry-run
+
+      - name: Dump, verify the dump's own row counts, and encrypt
+        if: steps.gate.outputs.enabled == 'true' && inputs.dry_run != true
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/backup"
+          node scripts/backup/run-backup.mjs --out "$RUNNER_TEMP/backup"
+          # Prove, in the log, that nothing unencrypted is about to be
+          # uploaded. Filenames only — never contents.
+          echo "Files staged for upload:"
+          ls -1 "$RUNNER_TEMP/backup"
+          if ls -1 "$RUNNER_TEMP/backup" | grep -E '\.sql$' ; then
+            echo "::error title=Unencrypted dump present::Refusing to upload."
+            exit 1
+          fi
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Optional: a CA bundle raises the default sslmode to verify-full,
+          # which authenticates the server rather than only encrypting to it.
+          BACKUP_CA_CERT: ${{ vars.BACKUP_CA_CERT_PATH }}
+
+      - name: Upload to private R2
+        if: steps.gate.outputs.enabled == 'true' && inputs.dry_run != true
+        run: |
+          set -euo pipefail
+          aws s3 cp "$RUNNER_TEMP/backup" "s3://${R2_BUCKET}/" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --recursive \
+            --only-show-errors
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          # R2 rejects the additional-checksum headers newer AWS CLI versions
+          # send by default. Verify at first run; docs/disaster-recovery.md
+          # records this.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+
+      # ───────────────────────────────────────────────────────────────────────
+      # VERIFY BEFORE PRUNING.
+      #
+      # Pruning assumes today's backup is safely in the bucket. If the upload
+      # was partial — a dropped connection, a token that expired mid-transfer,
+      # one object rejected — then pruning would delete an older COMPLETE
+      # backup on the strength of a backup that is not there. That is how a
+      # backup system destroys data.
+      #
+      # "The object exists" and "the object is intact" are different claims: a
+      # truncated upload exists. So every object is read BACK from the bucket
+      # and hashed against the manifest written at encryption time. If this
+      # step fails, the job fails and the next step does not run — today's
+      # backup may be incomplete, but nothing old was deleted.
+      # ───────────────────────────────────────────────────────────────────────
+      - name: Verify the upload against the manifest
+        id: verify
+        if: steps.gate.outputs.enabled == 'true' && inputs.dry_run != true
+        run: |
+          set -euo pipefail
+          manifest=$(ls -1 "$RUNNER_TEMP/backup"/*.manifest.json)
+          stem=$(basename "$manifest" .manifest.json)
+          readback="$RUNNER_TEMP/readback"
+          mkdir -p "$readback"
+
+          # Download every object of THIS set back out of the bucket.
+          aws s3 cp "s3://${R2_BUCKET}/" "$readback/" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --recursive \
+            --exclude "*" \
+            --include "${stem}.*" \
+            --only-show-errors
+
+          ( cd "$readback" && sha256sum ./* > "$RUNNER_TEMP/readback.sha256" )
+
+          node scripts/backup/verify-upload.mjs \
+            --manifest "$manifest" \
+            --hashes "$RUNNER_TEMP/readback.sha256"
+
+          echo "stem=$stem" >> "$GITHUB_OUTPUT"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+
+      - name: Apply retention
+        # Note `steps.verify.outcome`: retention runs ONLY after the upload has
+        # been proven intact. Without that, a failed verification followed by a
+        # successful prune is precisely the data-loss path.
+        if: >-
+          steps.gate.outputs.enabled == 'true' && inputs.dry_run != true &&
+          steps.verify.outcome == 'success'
+        run: |
+          set -euo pipefail
+          # List, decide, delete — as three visible steps rather than one
+          # script that could delete something it never listed.
+          aws s3 ls "s3://${R2_BUCKET}/" \
+            --endpoint-url "$R2_ENDPOINT" \
+            | awk '{print $4}' > "$RUNNER_TEMP/objects.txt"
+
+          # prune.mjs emits EXACT object names, never stems and never patterns.
+          node scripts/backup/prune.mjs < "$RUNNER_TEMP/objects.txt" > "$RUNNER_TEMP/prune.txt"
+
+          while read -r object; do
+            [ -z "$object" ] && continue
+            # One exact key per call. No --recursive, no --include, no glob:
+            # a wildcard could match an unrelated object that merely shares
+            # the backup's prefix.
+            echo "Removing $object"
+            aws s3 rm "s3://${R2_BUCKET}/${object}" \
+              --endpoint-url "$R2_ENDPOINT" \
+              --only-show-errors
+          done < "$RUNNER_TEMP/prune.txt"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+
+      - name: Raise an issue if the backup failed
+        if: failure() && steps.gate.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          gh issue create \
+            --title "Database backup failed on $(date -u +%Y-%m-%d)" \
+            --label backup-failure \
+            --body "The scheduled encrypted backup failed.
+
+          Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          One of: the dump, the dump's row-count check, the encryption, the
+          upload, the upload verification, or the retention step did not
+          complete. If verification failed, nothing old was deleted — but
+          today's backup may be absent or incomplete. Recovery procedure and
+          the meaning of each failure: docs/disaster-recovery.md" \
+            || echo "::warning title=Could not open an issue::Check the run log directly."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,32 @@
+# Cellar Atlas backup encryption recipient (age PUBLIC key).
+#
+# This file is committed on purpose. A public key is not a secret: it can
+# only ENCRYPT. The matching private key decrypts, and it must never be
+# committed, pasted into a GitHub secret, or stored on the runner.
+#
+# WHILE THE PLACEHOLDER BELOW IS STILL HERE, NO BACKUP WILL RUN.
+# scripts/backup/run-backup.mjs validates this file before it dumps anything,
+# and refuses rather than either writing an unencrypted dump or encrypting to
+# a key nobody holds. The second failure looks like success for months and is
+# discovered only during a restore, which is the worst time to find it.
+#
+# To set it up (see docs/disaster-recovery.md for the full procedure):
+#
+#   1. On your own machine, NOT in CI:
+#        age-keygen -o cellar-atlas-backup.key
+#      It prints "Public key: age1..." and writes the private key to that file.
+#
+#   2. Store cellar-atlas-backup.key offline — a password manager, or a
+#      printed copy in a safe. If you lose it, every backup becomes
+#      permanently unreadable. There is no recovery path, by design.
+#
+#   3. Replace the line below with the age1... public key and commit it.
+#
+#   4. Add the DATABASE_URL secret and set the BACKUP_ENABLED variable to
+#      true, as docs/disaster-recovery.md describes. Until that variable is
+#      set, the workflow exits without doing anything.
+#
+# Exactly one key may be listed. Every key listed can decrypt every backup,
+# so adding a second is a deliberate decision, never a leftover.
+
+REPLACE_WITH_YOUR_AGE_PUBLIC_KEY
