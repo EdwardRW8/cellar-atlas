@@ -248,9 +248,7 @@ function resolveGeography(
     const wanted = normalise(geographyAliases[normalised] ?? value);
 
     return nodes.filter(
-      (node) =>
-        normalise(node.name) === wanted &&
-        (!level || node.level === level),
+      (node) => normalise(node.name) === wanted && (!level || node.level === level),
     );
   };
 
@@ -266,25 +264,25 @@ function resolveGeography(
 
     // Country is useful for disambiguating otherwise identical place names.
     if (row.country) {
-  const countryMatches = exactMatches(row.country, "country");
-  const countryMatch = countryMatches[0];
+      const countryMatches = exactMatches(row.country, "country");
+      const countryMatch = countryMatches[0];
 
-  if (countryMatches.length === 1 && countryMatch) {
-    matches = matches.filter(
-      (match) => match.country_code === countryMatch.country_code,
-    );
-  }
-}
+      if (countryMatches.length === 1 && countryMatch) {
+        matches = matches.filter(
+          (match) => match.country_code === countryMatch.country_code,
+        );
+      }
+    }
 
-const match = matches[0];
+    const match = matches[0];
 
-if (matches.length === 1 && match) {
-  return {
-    geoRegionId: match.id,
-    countryCode: match.country_code,
-    regionText: null,
-  };
-}
+    if (matches.length === 1 && match) {
+      return {
+        geoRegionId: match.id,
+        countryCode: match.country_code,
+        regionText: null,
+      };
+    }
   }
 
   // No unique canonical match: preserve the most useful supplied text rather
@@ -358,8 +356,8 @@ export async function planImport(args: {
           colour: row.wineType,
           grapes: row.grapes,
           geo_region_id: geo.geoRegionId,
-country_code: geo.countryCode,
-region_text: geo.regionText,
+          country_code: geo.countryCode,
+          region_text: geo.regionText,
           drink_from: row.drinkFrom,
           drink_until: row.drinkUntil,
           notes: row.notes,
@@ -391,79 +389,79 @@ region_text: geo.regionText,
     // ── Positions: proven safe, or omitted ──
     const rowPositions: (Record<string, number> | null)[] = Array(row.quantity).fill(null);
 
-// A named location is used only when its storage rules can be satisfied.
-// Positioned layouts require a valid position. If none is supplied, the
-// bottles import unpositioned/unlocated after the user acknowledges the
-// warning rather than inventing a slot or violating the layout invariant.
-let storageLocationId: string | null = null;
-if (row.storageLocation?.trim()) {
-  const match = resolveLocation(row.storageLocation, locations);
-  if ("reason" in match) {
-    // Never invent a location, never guess between two. The bottles import
-    // unpositioned and unlocated, after the user acknowledges it.
-    positions.push({
-      lineNumber: row.lineNumber,
-      requested: row.position ?? null,
-      locationName: row.storageLocation,
-      resolved: false,
-      reason: match.reason,
-    });
-  } else {
-    const location = match.location;
+    // A named location is used only when its storage rules can be satisfied.
+    // Positioned layouts require a valid position. If none is supplied, the
+    // bottles import unpositioned/unlocated after the user acknowledges the
+    // warning rather than inventing a slot or violating the layout invariant.
+    let storageLocationId: string | null = null;
+    if (row.storageLocation?.trim()) {
+      const match = resolveLocation(row.storageLocation, locations);
+      if ("reason" in match) {
+        // Never invent a location, never guess between two. The bottles import
+        // unpositioned and unlocated, after the user acknowledges it.
+        positions.push({
+          lineNumber: row.lineNumber,
+          requested: row.position ?? null,
+          locationName: row.storageLocation,
+          resolved: false,
+          reason: match.reason,
+        });
+      } else {
+        const location = match.location;
 
-    if (!row.position && location.isPositioned) {
-      // A positioned layout cannot accept a bottle without a position.
-      // Keep storageLocationId null so the bottle imports safely unpositioned.
-      positions.push({
-        lineNumber: row.lineNumber,
-        requested: null,
-        locationName: row.storageLocation,
-        resolved: false,
-        reason: "invalid-for-layout",
-      });
-    } else {
-      storageLocationId = location.id;
+        if (!row.position && location.isPositioned) {
+          // A positioned layout cannot accept a bottle without a position.
+          // Keep storageLocationId null so the bottle imports safely unpositioned.
+          positions.push({
+            lineNumber: row.lineNumber,
+            requested: null,
+            locationName: row.storageLocation,
+            resolved: false,
+            reason: "invalid-for-layout",
+          });
+        } else {
+          storageLocationId = location.id;
 
-      if (row.position) {
-        let reason: PositionOutcome["reason"] | undefined;
-        if (!location.isPositioned) reason = "not-positioned";
-        else if (!location.isValidKey(row.position)) reason = "invalid-for-layout";
-        else {
-          const claimed = claimedInFile.get(location.id) ?? new Set<string>();
-          if (location.occupiedKeys.has(row.position)) reason = "occupied";
-          else if (claimed.has(row.position)) reason = "claimed-in-file";
-          else {
-            const parsed = args.parsePositionKey(location.id, row.position);
-            if (!parsed) reason = "invalid-for-layout";
-            else if (row.quantity > 1) {
-              // One CSV position cannot safely locate multiple bottles in a
-              // positioned layout. Import the whole item unpositioned rather
-              // than partially assigning storage.
-              reason = "invalid-for-layout";
-            } else {
-              rowPositions[0] = parsed;
-              claimed.add(row.position);
-              claimedInFile.set(location.id, claimed);
+          if (row.position) {
+            let reason: PositionOutcome["reason"] | undefined;
+            if (!location.isPositioned) reason = "not-positioned";
+            else if (!location.isValidKey(row.position)) reason = "invalid-for-layout";
+            else {
+              const claimed = claimedInFile.get(location.id) ?? new Set<string>();
+              if (location.occupiedKeys.has(row.position)) reason = "occupied";
+              else if (claimed.has(row.position)) reason = "claimed-in-file";
+              else {
+                const parsed = args.parsePositionKey(location.id, row.position);
+                if (!parsed) reason = "invalid-for-layout";
+                else if (row.quantity > 1) {
+                  // One CSV position cannot safely locate multiple bottles in a
+                  // positioned layout. Import the whole item unpositioned rather
+                  // than partially assigning storage.
+                  reason = "invalid-for-layout";
+                } else {
+                  rowPositions[0] = parsed;
+                  claimed.add(row.position);
+                  claimedInFile.set(location.id, claimed);
+                }
+              }
+            }
+
+            positions.push({
+              lineNumber: row.lineNumber,
+              requested: row.position,
+              locationName: row.storageLocation,
+              resolved: reason === undefined,
+              reason,
+            });
+
+            // An invalid supplied position must not leave the bottle assigned to
+            // a positioned location without a valid position.
+            if (reason !== undefined && location.isPositioned) {
+              storageLocationId = null;
             }
           }
         }
-
-        positions.push({
-          lineNumber: row.lineNumber,
-          requested: row.position,
-          locationName: row.storageLocation,
-          resolved: reason === undefined,
-          reason,
-        });
-
-        // An invalid supplied position must not leave the bottle assigned to
-        // a positioned location without a valid position.
-        if (reason !== undefined && location.isPositioned) {
-          storageLocationId = null;
-        }
       }
-    }
-  }
     } else if (row.position) {
       // A position with no location cannot be placed anywhere.
       positions.push({

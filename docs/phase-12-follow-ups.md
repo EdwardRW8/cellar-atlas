@@ -160,3 +160,27 @@ Phase 12. **Decide deliberately:** wire them in a later phase, or delete them.
 Leaving tested-but-dead code in place implies a capability the app does not
 have — which is what made the false "your change is queued" messaging
 plausible in the first place.
+
+---
+
+## 7. Smaller open items
+
+Recorded from the 12.1–12.4 instruction and from review. None blocks a gate;
+each is a real gap. Priority is my assessment, not a decision.
+
+| # | Item | Risk | Priority |
+|---|---|---|---|
+| 7a | **No in-app reset-password screen.** A user who forgets their password has no route back in from the app. | Lock-out; support burden | High once there is more than one user |
+| 7b | **An expired JWT is classified as a permission failure.** `classifyLoadError` matches `jwt` under `permission`, so an expired session reads as "You do not have permission" rather than "Please sign in again". | Misleading; user may think access was revoked | Medium |
+| 7c | **Only Home has the distinct load-error headings.** Collection, Atlas and Intelligence still show one generic heading over the raw error. | Inconsistent diagnosis | Medium |
+| 7d | **Add Wine mounts a second `CellarProvider`.** It is gated correctly, but the cellar is loaded twice — once per provider — on every visit. | Duplicate queries; two sources of truth | Medium |
+| 7e | **Possible missing memo dependencies elsewhere.** One omitted-dependency bug was found and fixed in `useCellar`; no audit has been done of the other memoised values. | Silent staleness, as with `creatingCellar` | Medium |
+| 7f | **README CSV import section is stale.** It does not match the allowed values now read from `mappings.ts` and `parse.ts`. | Users follow wrong guidance | Low, until the importer is used by others |
+| 7g | **Master project context document is stale.** It states 12.0 awaits commit and production is `f8fb682`. | Misleads a future session | Low, but cheap to fix |
+| 7h | **GitHub push token expiry.** Credential maintenance is manual and undocumented. | Blocks deployment at the worst moment | Low |
+
+### Note on 7b
+
+The fix is small — classify an expired or missing session as its own kind and
+prompt a re-sign-in — but it changes how `classifyLoadError` behaves, which
+12.1 tests pin. It belongs in its own change, not folded into another gate.

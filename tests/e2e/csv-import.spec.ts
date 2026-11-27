@@ -109,10 +109,10 @@ async function assertE2eCellar(page: Page): Promise<string> {
     "E2E_CELLAR_ID must be set before any mutating E2E test runs",
   ).toBeTruthy();
 
-expect(
-  expected,
-  "E2E_CELLAR_ID is not the dedicated E2E Test Cellar — refusing to mutate",
-).toBe(E2E_TEST_CELLAR_ID);
+  expect(
+    expected,
+    "E2E_CELLAR_ID is not the dedicated E2E Test Cellar — refusing to mutate",
+  ).toBe(E2E_TEST_CELLAR_ID);
 
   const res = await restRequest(page, "cellar_members?select=cellar_id");
   expect(res.status, "could not read cellar membership").toBe(200);
@@ -124,10 +124,10 @@ expect(
     ids.includes(expected!),
     "the signed-in user is not a member of E2E_CELLAR_ID — refusing to mutate",
   ).toBe(true);
-expect(
-  ids,
-  "the signed-in E2E user is not a member of the dedicated E2E Test Cellar — refusing to mutate",
-).toContain(expected);
+  expect(
+    ids,
+    "the signed-in E2E user is not a member of the dedicated E2E Test Cellar — refusing to mutate",
+  ).toContain(expected);
 
   return expected!;
 }
@@ -198,31 +198,31 @@ test.describe("Phase 11 — CSV import live acceptance", () => {
       timeout: 25_000,
     });
     await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible({
-  timeout: 25_000,
-});
+      timeout: 25_000,
+    });
 
-await expect
-  .poll(
-    () =>
-      page.evaluate(() => {
-        const key = Object.keys(localStorage).find((k) =>
-          k.startsWith("cellar_v3_auth"),
-        );
-        if (!key) return false;
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const key = Object.keys(localStorage).find((k) =>
+              k.startsWith("cellar_v3_auth"),
+            );
+            if (!key) return false;
 
-        const raw = localStorage.getItem(key);
-        if (!raw) return false;
+            const raw = localStorage.getItem(key);
+            if (!raw) return false;
 
-        try {
-          const session = JSON.parse(raw) as { access_token?: string };
-          return Boolean(session.access_token);
-        } catch {
-          return false;
-        }
-      }),
-    { timeout: 10_000 },
-  )
-  .toBe(true);
+            try {
+              const session = JSON.parse(raw) as { access_token?: string };
+              return Boolean(session.access_token);
+            } catch {
+              return false;
+            }
+          }),
+        { timeout: 10_000 },
+      )
+      .toBe(true);
   });
 
   test("imports a CSV through the real workflow and records it truthfully", async ({

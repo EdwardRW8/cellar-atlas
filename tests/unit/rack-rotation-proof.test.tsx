@@ -107,8 +107,8 @@ describe("the Face on control mirrors rotation state", () => {
   it("a sub-slop nudge rotates only fractionally but still registers", () => {
     const { container, getByRole } = renderGrid(4);
     drag(container, 6);
-    expect(
-      (getByRole("button", { name: /face on/i }) as HTMLButtonElement).disabled,
-    ).toBe(false);
+    expect((getByRole("button", { name: /face on/i }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
   });
 });

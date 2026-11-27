@@ -218,7 +218,7 @@ describe("all 73 rows import", () => {
 describe("storage: generic matching gives the right result", () => {
   const where = (id: string | null) =>
     plan.items.filter((i) => i.storageLocationId === id).length;
-    it("Cellar + cellar are left unlocated when the positioned layout has no supplied position", () => {
+  it("Cellar + cellar are left unlocated when the positioned layout has no supplied position", () => {
     expect(where("cellar")).toBe(0);
   });
 

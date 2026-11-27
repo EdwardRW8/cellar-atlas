@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  buildGeoPath,
-  type GeoRow,
-} from "@/data/repositories/cellar-repository";
+import { buildGeoPath, type GeoRow } from "@/data/repositories/cellar-repository";
 
 describe("canonical geography paths", () => {
   it("keeps the most-specific region when regions are nested", () => {

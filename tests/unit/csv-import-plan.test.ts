@@ -214,7 +214,6 @@ describe("geography resolution", () => {
     expect(p.winesToCreate[0]!.wine.country_code).toBe("US");
     expect(p.winesToCreate[0]!.wine.region_text).toBeNull();
   });
-
 });
 // ═══════════════════════════════════════════════════════════════════════════
 // BOTTLE-PER-ROW
