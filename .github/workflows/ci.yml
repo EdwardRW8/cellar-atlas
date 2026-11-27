@@ -58,7 +58,7 @@ jobs:
       # Playwright needs its browser binaries only for the harness project's
       # runner; no browser is actually launched against a site.
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
 
       # Build first because architecture tests inspect dist/.
       - name: Production build
